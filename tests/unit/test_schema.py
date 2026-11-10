@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 from pathlib import Path
 
 import pytest
@@ -213,3 +214,80 @@ value_columns: [weight]
         manifest=m,
     )
     assert schema.columns["weight"].type == InferredType.DECIMAL
+
+
+def test_schema_infer_path_with_single_quotes_csv(tmp_path: Path) -> None:
+    """Verify schema inference succeeds on CSV paths containing single quotes."""
+    quote_dir = tmp_path / "vendor's_drop"
+    quote_dir.mkdir()
+    f = quote_dir / "data'with'quote.csv"
+    f.write_text("record_id,amount,description\n1,123.45,item_a\n2,678.90,item_b\n", encoding="utf-8")
+
+    schema = infer_schema(quote_dir, vendor="quoted_vendor")
+    assert "record_id" in schema.columns
+    assert "amount" in schema.columns
+    assert "description" in schema.columns
+    assert schema.columns["record_id"].type == InferredType.INTEGER
+    assert schema.columns["amount"].type == InferredType.DECIMAL
+    assert schema.columns["description"].type == InferredType.STRING
+
+
+def test_schema_infer_path_with_single_quotes_jsonl(tmp_path: Path) -> None:
+    """Verify schema inference succeeds on JSONL paths containing single quotes."""
+    quote_dir = tmp_path / "vendor's_jsonl_drop"
+    quote_dir.mkdir()
+    f = quote_dir / "records'data.jsonl"
+    f.write_text(
+        '{"record_id": 1, "ticker": "AAPL", "price": 180.50}\n'
+        '{"record_id": 2, "ticker": "MSFT", "price": 375.25}\n',
+        encoding="utf-8",
+    )
+
+    schema = infer_schema(quote_dir, vendor="quoted_jsonl_vendor")
+    assert schema.columns["record_id"].type == InferredType.INTEGER
+    assert schema.columns["ticker"].type == InferredType.STRING
+    assert schema.columns["price"].type == InferredType.DECIMAL
+
+
+def test_schema_infer_path_with_single_quotes_csv_gz(tmp_path: Path) -> None:
+    """Verify schema inference succeeds on gzipped CSV paths containing single quotes."""
+    quote_dir = tmp_path / "vendor's_gz_drop"
+    quote_dir.mkdir()
+    f = quote_dir / "compressed'data.csv.gz"
+    csv_bytes = b"record_id,flag\n100,true\n200,false\n"
+    f.write_bytes(gzip.compress(csv_bytes, mtime=0))
+
+    schema = infer_schema(quote_dir, vendor="quoted_gz_vendor")
+    assert schema.columns["record_id"].type == InferredType.INTEGER
+    assert schema.columns["flag"].type == InferredType.BOOLEAN
+
+
+def test_schema_infer_single_column_csv(tmp_path: Path) -> None:
+    """Verify schema inference accurately profiles single-column CSV datasets."""
+    drop_dir = tmp_path / "single_col_drop"
+    drop_dir.mkdir()
+    f = drop_dir / "universe.csv"
+    f.write_text("ticker\nAAPL\nMSFT\nGOOGL\nAMZN\n", encoding="utf-8")
+
+    schema = infer_schema(drop_dir, vendor="universe_vendor")
+    assert len(schema.columns) == 1
+    assert "ticker" in schema.columns
+    assert schema.columns["ticker"].type == InferredType.STRING
+    assert schema.columns["ticker"].distinct_count == 4
+    assert schema.columns["ticker"].nullable is False
+
+
+def test_schema_pin_and_check_path_with_quotes(tmp_path: Path) -> None:
+    """Verify schema pinning and drift checking operate as expected on paths with single quotes."""
+    quote_dir = tmp_path / "quote's_check_drop"
+    quote_dir.mkdir()
+    f = quote_dir / "quote'data.csv"
+    f.write_text("col_a,col_b\n1,alpha\n2,beta\n", encoding="utf-8")
+
+    schema_dir = tmp_path / "schemas'dir"
+    pinned_path = pin_schema("quote_vendor", drop_path=quote_dir, schema_dir=schema_dir)
+    assert pinned_path.exists()
+
+    diff = check_schema("quote_vendor", drop_path=quote_dir, schema_dir=schema_dir)
+    assert diff.has_hold is False
+    assert len(diff.differences) == 0

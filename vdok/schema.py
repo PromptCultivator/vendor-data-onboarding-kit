@@ -436,16 +436,16 @@ def _infer_text_file(
         path_str = str(file_path)
         if fmt == FileFormat.CSV:
             # Read as all_varchar to preserve exact numeric formatting and decimal digits
-            df = con.sql(
-                f"SELECT * FROM read_csv('{path_str}', all_varchar=True) LIMIT {max_sample_rows}"
-            ).to_arrow_table()
+            df = con.read_csv(
+                path_str,
+                all_varchar=True,
+            ).limit(max_sample_rows).to_arrow_table()
         else:
             # JSONL: read with read_json
-            df = con.sql(
-                f"SELECT * FROM read_json('{path_str}', "
-                f"format='newline_delimited') "
-                f"LIMIT {max_sample_rows}"
-            ).to_arrow_table()
+            df = con.read_json(
+                path_str,
+                format="newline_delimited",
+            ).limit(max_sample_rows).to_arrow_table()
 
         data_dict = df.to_pydict()
         columns: dict[str, ColumnSchema] = {}

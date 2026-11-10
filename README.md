@@ -29,7 +29,7 @@ Hardware & Environment:
   Python Version: 3.11.2
   DuckDB Version: 2.0.0
   PyArrow Version: 26.0.1
-  Git Commit: pending
+  Git Commit: b8ac12502810e5b17630eb0794a1d851fad73862
 ```
 
 ## Quick Start

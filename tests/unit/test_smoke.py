@@ -30,9 +30,13 @@ def test_cli_version() -> None:
     assert "0.1.0" in result.output
 
 
-def test_cli_synth_command() -> None:
-    """Verify synth command stub executes."""
-    result = runner.invoke(app, ["synth", "--size-gb", "1", "--seed", "42"])
+def test_cli_synth_command(tmp_path: Path) -> None:
+    """Verify synth command executes."""
+    out_dir = str(tmp_path / "synthetic")
+    result = runner.invoke(
+        app,
+        ["synth", "--size-gb", "0.0001", "--seed", "42", "--output-dir", out_dir],
+    )
     assert result.exit_code == 0
     assert "Synthetic generator" in result.output
 

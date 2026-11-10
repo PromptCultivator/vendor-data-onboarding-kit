@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import gzip
 
 import duckdb
 import pytest
@@ -225,3 +226,98 @@ def test_discover_mixed_compression(tmp_path: Path) -> None:
 
 def test_check_idempotency_nonexistent_store(tmp_path: Path) -> None:
     assert check_idempotency("any_id", store_path=tmp_path / "nonexistent") is False
+
+
+def test_discover_single_column_csv_unquoted(tmp_path: Path) -> None:
+    """Verify single-column CSV without commas is recognized as CSV."""
+    f = tmp_path / "tickers.csv"
+    f.write_text("ticker\nAAPL\nMSFT\nGOOGL\n", encoding="utf-8")
+    fmt, comp = detect_file_format(f)
+    assert fmt == FileFormat.CSV
+    assert comp == Compression.NONE
+
+    meta = scan(tmp_path)
+    assert meta.file_format == FileFormat.CSV
+    assert len(meta.files) == 1
+
+
+def test_discover_single_column_csv_quoted(tmp_path: Path) -> None:
+    """Verify single-column CSV with quotes is recognized as CSV."""
+    f = tmp_path / "ciks.csv"
+    f.write_text('"cik"\n"0000320193"\n"0000320194"\n', encoding="utf-8")
+    fmt, comp = detect_file_format(f)
+    assert fmt == FileFormat.CSV
+    assert comp == Compression.NONE
+
+
+def test_discover_single_column_csv_gzipped(tmp_path: Path) -> None:
+    """Verify single-column gzipped CSV is recognized as CSV with GZIP compression."""
+    f = tmp_path / "tickers.csv.gz"
+    f.write_bytes(gzip.compress(b"ticker\nAAPL\nMSFT\n", mtime=0))
+    fmt, comp = detect_file_format(f)
+    assert fmt == FileFormat.CSV
+    assert comp == Compression.GZIP
+
+
+def test_discover_leading_empty_lines_tolerance_csv(tmp_path: Path) -> None:
+    """Verify files with 6 or more leading blank lines are recognized without DiscoveryError."""
+    f = tmp_path / "leading_blanks.csv"
+    f.write_text("\n\n\n\n\n\ncik,val\n0000320193,100\n", encoding="utf-8")
+    fmt, comp = detect_file_format(f)
+    assert fmt == FileFormat.CSV
+    assert comp == Compression.NONE
+
+    meta = scan(tmp_path)
+    assert meta.file_format == FileFormat.CSV
+
+
+def test_discover_leading_empty_lines_tolerance_csv_gz(tmp_path: Path) -> None:
+    """Verify gzipped files with leading blank lines are recognized."""
+    f = tmp_path / "leading_blanks.csv.gz"
+    f.write_bytes(gzip.compress(b"\n\n\n\n\n\n\n\ncik,val\n0000320193,100\n", mtime=0))
+    fmt, comp = detect_file_format(f)
+    assert fmt == FileFormat.CSV
+    assert comp == Compression.GZIP
+
+
+def test_discover_corrupted_gzip_deflate_stream_raises_corrupted_archive(tmp_path: Path) -> None:
+    """Verify corrupted DEFLATE streams trigger CorruptedArchiveError instead of leaking zlib.error."""
+    valid_data = b"cik,event_time,value\n" + b"".join(
+        f"0000320193,2023-12-31,{i}\n".encode("utf-8") for i in range(50)
+    )
+    corrupted_gz = bytearray(gzip.compress(valid_data, mtime=0))
+    corrupted_gz[35] ^= 0xFF
+
+    drop_dir = tmp_path / "corrupted_drop"
+    drop_dir.mkdir()
+    (drop_dir / "data.csv.gz").write_bytes(bytes(corrupted_gz))
+
+    with pytest.raises(CorruptedArchiveError):
+        scan(drop_dir)
+
+    with pytest.raises(CorruptedArchiveError):
+        detect_file_format(drop_dir / "data.csv.gz")
+
+
+def test_check_idempotency_wildcard_rejection(tmp_path: Path) -> None:
+    """Verify wildcard characters in drop_id return False and do not match parquet partitions."""
+    part_file = tmp_path / "part-6ad1187f7e1ff96c.parquet"
+    part_file.touch()
+
+    assert check_idempotency("6ad1187f7e1ff96c", store_path=tmp_path) is True
+    assert check_idempotency("*", store_path=tmp_path) is False
+    assert check_idempotency("part-*", store_path=tmp_path) is False
+    assert check_idempotency("6ad1187f7e1ff96?", store_path=tmp_path) is False
+    assert check_idempotency("[0-9]*", store_path=tmp_path) is False
+
+
+def test_check_idempotency_wildcard_in_duckdb(tmp_path: Path) -> None:
+    """Verify wildcard queries return False when querying DuckDB store."""
+    db_file = tmp_path / "store.duckdb"
+    con = duckdb.connect(str(db_file))
+    con.execute("CREATE TABLE drops (drop_id VARCHAR, status VARCHAR)")
+    con.execute("INSERT INTO drops VALUES ('6ad1187f7e1ff96c', 'COMMITTED')")
+    con.close()
+
+    assert check_idempotency("6ad1187f7e1ff96c", store_path=tmp_path) is True
+    assert check_idempotency("*", store_path=tmp_path) is False

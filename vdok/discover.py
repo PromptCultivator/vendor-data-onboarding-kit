@@ -10,6 +10,8 @@ import datetime
 import gzip
 import hashlib
 import json
+import re
+import zlib
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -121,7 +123,7 @@ def detect_file_format(path: Path) -> tuple[FileFormat, Compression]:
 
     compression = Compression.GZIP if is_gzip else Compression.NONE
 
-    # 2. Check Parquet header/footer when uncompressed
+    # 2. Check Parquet header/footer when uncompressed or check binary null bytes
     if not is_gzip:
         if file_size >= 8:
             try:
@@ -144,31 +146,49 @@ def detect_file_format(path: Path) -> tuple[FileFormat, Compression]:
                 raise UnrecognizedFormatError(f"File {path} contains binary null bytes.")
         except OSError as exc:
             raise FileAccessError(f"Cannot inspect bytes in {path}: {exc}") from exc
+    else:
+        try:
+            with gzip.open(path, "rb") as gz_raw:
+                decomp_sample = gz_raw.read(4096)
+            if b"\x00" in decomp_sample:
+                raise UnrecognizedFormatError(f"File {path} contains binary null bytes.")
+        except (gzip.BadGzipFile, OSError, EOFError, zlib.error) as exc:
+            raise CorruptedArchiveError(f"Cannot decompress gzip file {path}: {exc}") from exc
 
     # 3. Read leading lines from stream for text-based inspection
-    lines: list[str] = []
+    MAX_LOOKAHEAD_LINES = 50
+    DESIRED_NON_EMPTY_RECORDS = 5
+    non_empty: list[str] = []
+
     if is_gzip:
         try:
             with gzip.open(path, "rt", encoding="utf-8", errors="replace") as gz:
-                for _ in range(5):
+                for _ in range(MAX_LOOKAHEAD_LINES):
                     line = gz.readline()
                     if not line:
                         break
-                    lines.append(line)
-        except (gzip.BadGzipFile, OSError, EOFError) as exc:
+                    stripped = line.strip()
+                    if stripped:
+                        non_empty.append(stripped)
+                        if len(non_empty) >= DESIRED_NON_EMPTY_RECORDS:
+                            break
+        except (gzip.BadGzipFile, OSError, EOFError, zlib.error) as exc:
             raise CorruptedArchiveError(f"Cannot decompress gzip file {path}: {exc}") from exc
     else:
         try:
             with open(path, "rt", encoding="utf-8", errors="replace") as f:
-                for _ in range(5):
+                for _ in range(MAX_LOOKAHEAD_LINES):
                     line = f.readline()
                     if not line:
                         break
-                    lines.append(line)
+                    stripped = line.strip()
+                    if stripped:
+                        non_empty.append(stripped)
+                        if len(non_empty) >= DESIRED_NON_EMPTY_RECORDS:
+                            break
         except OSError as exc:
             raise FileAccessError(f"Cannot read text records from {path}: {exc}") from exc
 
-    non_empty = [line.strip() for line in lines if line.strip()]
     if not non_empty:
         raise DiscoveryError(f"File {path} contains no non-empty text records.")
 
@@ -185,9 +205,14 @@ def detect_file_format(path: Path) -> tuple[FileFormat, Compression]:
     # 5. Check CSV via DuckDB sniffer
     con = duckdb.connect()
     try:
-        res = con.execute("SELECT Delimiter FROM sniff_csv(?)", [str(path)]).fetchone()
-        if res and res[0] and res[0] in first_record:
-            return FileFormat.CSV, compression
+        res = con.execute("SELECT Delimiter, Columns FROM sniff_csv(?)", [str(path)]).fetchone()
+        if res:
+            delim = res[0]
+            cols = res[1]
+            if delim and delim in first_record:
+                return FileFormat.CSV, compression
+            if (cols and len(cols) == 1) or path.name.lower().endswith((".csv", ".csv.gz")):
+                return FileFormat.CSV, compression
     except Exception:
         pass
     finally:
@@ -197,6 +222,9 @@ def detect_file_format(path: Path) -> tuple[FileFormat, Compression]:
     for candidate_delim in (",", "\t", "|", ";"):
         if candidate_delim in first_record:
             return FileFormat.CSV, compression
+
+    if path.name.lower().endswith((".csv", ".csv.gz")):
+        return FileFormat.CSV, compression
 
     raise UnrecognizedFormatError(f"File {path} does not match supported data formats.")
 
@@ -214,7 +242,7 @@ def hash_file_payload(path: Path, compression: Compression) -> tuple[str, int]:
                     if not chunk:
                         break
                     hasher.update(chunk)
-        except (gzip.BadGzipFile, OSError, EOFError) as exc:
+        except (gzip.BadGzipFile, OSError, EOFError, zlib.error) as exc:
             raise CorruptedArchiveError(
                 f"Decompression failure during hashing of {path}: {exc}"
             ) from exc
@@ -335,8 +363,9 @@ def check_idempotency(drop_id: str, store_path: Path | str | None = None) -> boo
                     pass
 
     if base_path.is_dir():
-        matches = list(base_path.glob(f"**/part-{drop_id}.parquet"))
-        if matches:
-            return True
+        if re.fullmatch(r"^[0-9a-f]{16}$", drop_id):
+            matches = list(base_path.glob(f"**/part-{drop_id}.parquet"))
+            if matches:
+                return True
 
     return False

@@ -13,6 +13,10 @@ This document records explicit choices made when specifications offer implementa
 | D-005 | Smoke Benchmark Exit Code and Invariant Check | 2026-11-10 | Accepted |
 | D-006 | Makefile Setup Virtual Environment Creation and Exact Sync | 2026-11-10 | Accepted |
 | D-007 | Pyright Local Virtual Environment Discovery Configuration | 2026-11-10 | Accepted |
+| D-008 | Deterministic Gzip Fixture Generation with Epoch Timestamp Zeroing | 2026-11-10 | Accepted |
+| D-009 | Uncompressed Payload Hashing for Gzip Drop Identity | 2026-11-10 | Accepted |
+| D-010 | Prioritized JSON Lines Stream Inspection Ahead of CSV Sniffing | 2026-11-10 | Accepted |
+| D-011 | Exact Fixed-Point Decimal Enforcement for Monetary Columns | 2026-11-10 | Accepted |
 
 
 ---
@@ -109,4 +113,57 @@ This document records explicit choices made when specifications offer implementa
 - **Decision:** Implement option 2: declare `venvPath = "."`, `venv = ".venv"`, and `exclude = [".venv"]` in `pyproject.toml` while retaining `typeCheckingMode = "standard"`.
 - **Justification:** Pyright automatically resolves imported packages from the repository virtual environment across all execution contexts (Make, bare CLI, and IDE LSPs). Standard mode avoids false-positive missing stub diagnostics for dependencies like `pyarrow` that lack bundled stubs.
 - **Test Guarantee Impact:** Ensures both `make typecheck` and direct `.venv/bin/pyright` CLI invocations pass with 0 errors and 0 warnings.
+
+---
+
+### D-008: Deterministic Gzip Fixture Generation with Epoch Timestamp Zeroing
+
+- **Date:** 2026-11-10
+- **Context:** Python's standard `gzip.compress` records the current operating system epoch timestamp in header bytes 4–7. Creating fixture archives at differing moments results in divergent file SHA-256 digests despite identical uncompressed payloads.
+- **Options Considered:**
+  1. Permit variable on-disk gzip file hashes and verify fixture integrity only through stream decompression.
+  2. Enforce `mtime=0` in `gzip.compress` calls across all fixture generation routines.
+- **Decision:** Enforce `mtime=0` for all `.gz` fixture creation.
+- **Justification:** Guarantees that fixture generation produces byte-identical files across operating systems and execution runs, preserving offline reproducibility.
+- **Test Guarantee Impact:** Eliminates hash variability in committed test assets and CI verification pipelines.
+
+---
+
+### D-009: Uncompressed Payload Hashing for Gzip Drop Identity
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.2 defines `drop_id = sha256(sorted(file sha256s))[:16]`. Data vendors may re-compress identical data feeds with different compression levels, utilities, or timestamps.
+- **Options Considered:**
+  1. Calculate SHA-256 strictly on raw on-disk bytes of files regardless of compression.
+  2. Decompress gzip streams during hashing and compute SHA-256 over uncompressed payload bytes.
+- **Decision:** Implement streaming decompression for gzip files during hashing, computing file digests over uncompressed payload bytes.
+- **Justification:** Preserves semantic data identity under Guarantee 3 (G3 drop idempotency), ensuring identical source data produces identical drop IDs irrespective of compression variance.
+- **Test Guarantee Impact:** Guarantees that `baseline_csv` and `baseline_csv_gz` produce identical drop IDs (`6ad1187f7e1ff96c`), and `baseline_jsonl` and `baseline_jsonl_gz` produce identical drop IDs (`8f548c6a42b31fa6`).
+
+---
+
+### D-010: Prioritized JSON Lines Stream Inspection Ahead of CSV Sniffing
+
+- **Date:** 2026-11-10
+- **Context:** DuckDB `sniff_csv` evaluates line-delimited files heuristically. When executed against valid JSON Lines files containing embedded commas inside nested objects, it falsely classifies the file as comma-delimited CSV.
+- **Options Considered:**
+  1. Execute CSV sniffing first and rely on downstream parser exceptions to catch misclassification.
+  2. Implement a defense-in-depth inspection hierarchy: inspect magic bytes (gzip, Parquet), validate JSON object structure on leading non-empty lines, and only fall back to CSV delimiter sniffing if JSON parsing fails.
+- **Decision:** Implement option 2: inspect leading non-empty lines for JSON object syntax (`{...}`) with `json.loads` validation before running CSV delimiter sniffing, and require detected delimiters to be present in leading text records.
+- **Justification:** Prevents false-positive CSV format classification on JSON Lines drops.
+- **Test Guarantee Impact:** Guarantees accurate format detection across CSV, JSONL, and Parquet feeds without relying on file extension assumptions.
+
+---
+
+### D-011: Exact Fixed-Point Decimal Enforcement for Monetary Columns
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.3 mandates exact decimal representation (`decimal(38, 9)`) for monetary amounts and strictly prohibits floating-point coercion.
+- **Options Considered:**
+  1. Rely on general DuckDB/PyArrow default numeric inference, which represents fractional numeric fields as 64-bit IEEE 754 floats.
+  2. Enforce exact fixed-point `Decimal` parsing with scale and precision derivation for columns declared in manifest `value_columns` or matching monetary nomenclature.
+- **Decision:** Implement option 2: enforce exact fixed-point Decimal parsing on monetary fields across CSV, JSONL, and Parquet data.
+- **Justification:** Eliminates binary floating-point representation drift and rounding inaccuracies on financial values.
+- **Test Guarantee Impact:** Inferred monetary columns are typed as `decimal` with preserved scale, preventing float conversion across tabular feeds.
+
 

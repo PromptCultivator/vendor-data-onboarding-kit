@@ -1,0 +1,68 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "vendor-data-onboarding-kit"
+version = "0.1.0"
+description = "Institutional-grade research infrastructure and market data platform for quant hedge funds and data engineering teams."
+requires-python = ">=3.11"
+authors = [
+    { name = "Quant Data Platform Team" }
+]
+dependencies = [
+    "duckdb>=2.0.0",
+    "pyarrow>=26.0.0",
+    "numpy>=2.0.0",
+    "pydantic>=2.10.0",
+    "polars>=2.1.0",
+    "pandas>=3.0.0",
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "pyyaml>=6.0",
+    "zstandard>=0.23.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.4.0",
+    "mypy>=1.9.0",
+]
+
+[project.scripts]
+vendor-kit = "vendor_onboarding.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/vendor_onboarding"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-v --strict-markers"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+ignore = ["SIM117"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+no_implicit_optional = true
+
+[[tool.mypy.overrides]]
+module = ["pyarrow.*", "duckdb.*"]
+ignore_missing_imports = true

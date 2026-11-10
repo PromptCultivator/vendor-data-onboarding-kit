@@ -20,6 +20,8 @@ This document records explicit choices made when specifications offer implementa
 | D-012 | Elimination of CLI Test Facades in Favor of Authentic Fixtures | 2026-11-10 | Accepted |
 | D-013 | DuckDB Programmatic Relation API for Path Safety | 2026-11-10 | Accepted |
 | D-014 | Format Sniffer Extension and Decompression Error Wrapping | 2026-11-10 | Accepted |
+| D-015 | Canonical Arrow and Pydantic Bitemporal Schema with Strict Decimal Float Rejection | 2026-11-10 | Accepted |
+| D-016 | Immutable Hash-Versioned Symbol Master and Deterministic Identifier Mapping | 2026-11-10 | Accepted |
 
 
 ---
@@ -207,6 +209,35 @@ This document records explicit choices made when specifications offer implementa
 - **Decision:** Implement option 2.
 - **Justification:** Financial universes often arrive as 1-column ticker or CIK feeds, and archives with damaged DEFLATE streams must raise typed exceptions per discovery contract.
 - **Test Guarantee Impact:** Guarantees correct classification of single-column tables, leading blank lines tolerance, and exception boundaries across all drop formats.
+
+---
+
+### D-015: Canonical Arrow and Pydantic Bitemporal Schema with Strict Decimal Float Rejection
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.4 mandates a canonical row model (as both an Apache Arrow schema and a Pydantic model for unit tests) with exact bit widths, UTC microseconds timestamps, and fixed-point `decimal128(38, 9)` for numeric amounts. SPEC § 5.4 and § 13 explicitly require that decimal monetary fields must never pass through IEEE 754 floating-point representations. Furthermore, drop normalization requires deterministic hashing across fields and unit standardisation.
+- **Options Considered:**
+  1. Permit automatic type coercion from standard Python floats to Decimal or PyArrow float64 columns during row parsing.
+  2. Enforce strict type validation: reject Python `float` instances at normalizer entry points (`parse_decimal_exact`) with `TypeError`, parse string/integer inputs into `Decimal` instances with explicit quantization, enforce `all_varchar=True` during DuckDB tabular ingestion of raw CSV drops, and generate deterministic SHA-256 row fingerprints using ASCII null delimiters (`\0`) to eliminate delimiter collisions.
+- **Decision:** Implement option 2: define `CANONICAL_ARROW_SCHEMA` with 12 canonical fields plus `unmapped: bool`, implement Pydantic v2 `CanonicalRow` with strict float rejection on `value_num`, provide pure normalizers (`parse_decimal_exact`, `parse_timestamp_utc`, `normalize_unit`, `normalize_unit_and_value`, `normalize_identifier`, `compute_row_hash`), and transform drop batches into canonical Arrow tables without third-party timezone libraries.
+- **Justification:** Floating-point representations introduce precision errors and rounding artifacts in quantitative and financial computations (such as fractional pennies or non-exact decimal fractions like 0.1). Rejecting floats unconditionally at the boundary ensures financial calculations remain exact. Separating fields with null-byte delimiters in `compute_row_hash` eliminates collision vulnerabilities present in arbitrary punctuation joins.
+- **Consequences:** Data loaders and adapters must supply numeric data as strings, integers, or `Decimal` instances. Floating-point inputs raise explicit `TypeError` exceptions that must be handled or converted upstream. Memory footprint is slightly larger for exact Decimal objects compared to primitive IEEE floats, but precision and auditability are preserved.
+- **Test Guarantee Impact:** Verified by Hypothesis property tests (`test_normalize_properties.py`) over all floating-point numbers asserting strict rejection, and unit tests (`test_normalize.py`) verifying exact scale preservation, null-delimiter collision resistance, and schema conformance across CSV, JSON Lines, and Parquet.
+
+---
+
+### D-016: Immutable Hash-Versioned Symbol Master and Deterministic Identifier Mapping
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.6 and ADR 005 require symbol master construction from public SEC `company_tickers.json` files, stored in Parquet format, refreshed by content hash so that any upstream modification produces a new version with an effective date. Mapping must be rule-based and deterministic: exact matching on identifier type, case folding and exchange suffix stripping for tickers, dual-class share translation, exact title matching for company names, and zero heuristic or fuzzy matching. Unresolved records must retain their raw identifier and be flagged with `unmapped=True`.
+- **Options Considered:**
+  1. Use heuristic string distance (Levenshtein, Jaro-Winkler) or machine learning embeddings to infer matching tickers or CIKs for ambiguous or unmapped vendor entities.
+  2. Implement an immutable, content-hash-versioned symbol master stored as read-only Parquet (`data/symbols/master_v<version_id>.parquet` with mode `0o444`), executing deterministic exact lookups: zero-padded 10-digit CIK lookup, uppercase ticker lookup with exchange suffix stripping (`.OQ`, `.N`, etc.) and dual-class translation (`.` or `/` to `-`), and exact normalized company title lookup. Flag all unresolved rows as `unmapped=True` with original raw identifiers preserved.
+- **Decision:** Implement option 2: build `SymbolMaster` with content-derived 16-hex version IDs (`sha256(raw_bytes)[:16]`), write immutable Parquet files with POSIX read-only permissions (`0o444`), execute rule-based deterministic resolution returning `ResolutionResult(entity_id, unmapped)`, and prohibit heuristic fuzzy resolution.
+- **Justification:** Probabilistic or fuzzy matching introduces silent identification errors in financial data onboarding, potentially attributing financial statements or market prices to incorrect corporate entities. Flagging unresolved rows explicitly preserves complete auditability and exposes unmapped rates in downstream readiness reports without corrupting data truth. Hash-versioned storage ensures immutable lineage tracking across drops.
+- **Consequences:** Vendor entities with unrecognized abbreviations, typographical errors, or tickers not present in the SEC master cannot be resolved automatically; they remain flagged as unmapped and require human intervention or master updates.
+- **Test Guarantee Impact:** Verified by Hypothesis property tests (`test_symbols_properties.py`) and unit tests (`test_symbols.py`) confirming CIK padding invariants, ticker folding invariance, suffix stripping invariance, dual-class equivalence, version migration immutability, and 100% rejection of fuzzy matches.
+
 
 
 

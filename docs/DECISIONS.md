@@ -29,6 +29,10 @@ This document records explicit choices made when specifications offer implementa
 | D-021 | Read-Only POSIX 0o444 Partition Locking and Append-Only Collision Refusal | 2026-11-10 | Accepted |
 | D-022 | Windowed Revision Detection via Relational Distinct Comparisons | 2026-11-10 | Accepted |
 | D-023 | Timezone-Aware Zero-Pytz Query Path via PyArrow Table Materialization | 2026-11-10 | Accepted |
+| D-024 | Drop-Level Knowledge Time Evaluation for Batch Temporal Coherence | 2026-11-10 | Accepted |
+| D-025 | Dual-Path Fallback for ISO-8601 and Delimited Timestamp Ingestion | 2026-11-10 | Accepted |
+| D-026 | Deterministic Multi-Tie Breaking and Relation Separation for Diff and Readiness Reports | 2026-11-10 | Accepted |
+| D-027 | Thread-Safe SEC EDGAR Rate Limiting and Atomic Ingestion Caching | 2026-11-10 | Accepted |
 
 
 ---
@@ -386,3 +390,17 @@ This document records explicit choices made when specifications offer implementa
 - **Decision:** Implement Option 2 in `vdok/report.py`.
 - **Justification:** Guarantees bit-for-bit identical markdown reports across runs regardless of query execution plans or filesystem iteration order. Eliminates connection cursor conflicts when running multiple analytical passes over Parquet views.
 - **Test Guarantee Impact:** Verified by `tests/golden/test_report_goldens.py` and `tests/unit/test_report.py`.
+
+---
+
+### D-027: Thread-Safe SEC EDGAR Rate Limiting and Atomic Ingestion Caching
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 6.1 and Section 7 require rate-limiting requests to the SEC EDGAR system at at most 5 requests per second with a compliant User-Agent (`vendor-data-onboarding-kit <contact email>`), as well as caching downloads by SHA-256 hash in `data/raw/`.
+- **Options Considered:**
+  1. Plain `time.sleep(0.2)` in iterative loops without concurrency safety or hash verification.
+  2. Implement a dedicated `SecRateLimiter` class using a thread-safe `threading.Lock` enforcing inter-request intervals of at least 0.25 seconds (at most 4 requests per second, strictly complying with the 5 rps ceiling). Stream downloads to `.tmp` files, compute SHA-256 digests in-flight, atomically replace targets upon verification, and store digests in `.sha256` sidecars for instant cache validation.
+- **Decision:** Implement Option 2 in `vdok/adapters/sec_fsds.py`.
+- **Justification:** SEC EDGAR strictly blocks IP addresses that exceed 10 requests per second or fail User-Agent identification standards. Enforcing atomic streaming and sidecar hashing prevents corrupted partial archives from entering the store while eliminating duplicate downloads.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_sec_fsds.py` (rate limiting, User-Agent formatting, hash caching, and real download of 2023q3).
+

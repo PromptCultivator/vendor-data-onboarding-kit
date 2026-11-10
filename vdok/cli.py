@@ -62,6 +62,92 @@ def synth(
 
 
 @app.command()
+def data(
+    quarters: Optional[list[str]] = typer.Option(
+        None,
+        "--quarters",
+        "-q",
+        help="SEC FSDS quarters to download (e.g. 2023q3). Defaults to 4 quarters.",
+    ),
+    raw_dir: str = typer.Option(
+        "data/raw/sec_fsds",
+        "--raw-dir",
+        help="Directory to save raw quarterly SEC archives",
+    ),
+    symbols_dir: str = typer.Option(
+        "data/symbols",
+        "--symbols-dir",
+        help="Directory to save symbol reference and symbol master",
+    ),
+    user_agent: Optional[str] = typer.Option(
+        None,
+        "--user-agent",
+        help="Custom User-Agent header (defaults to VDOK_CONTACT env or research default)",
+    ),
+    extract: bool = typer.Option(
+        True,
+        "--extract/--no-extract",
+        help="Extract quarterly archives into directories",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Force redownload even if cached files exist",
+    ),
+    json_output: bool = typer.Option(
+        False,
+        "--json-output",
+        help="Output download summary in JSON format",
+    ),
+) -> None:
+    """Download SEC FSDS quarterly datasets and company_tickers symbol reference."""
+    import json
+
+    from vdok.adapters.sec_fsds import download_sec_fsds
+
+    parsed_quarters: list[str] = []
+    if quarters:
+        for item in quarters:
+            for q in item.split(","):
+                norm_q = q.strip()
+                if norm_q:
+                    parsed_quarters.append(norm_q)
+
+    typer.echo("Initiating SEC data acquisition...")
+    results = download_sec_fsds(
+        quarters=parsed_quarters or None,
+        dest_dir=raw_dir,
+        symbols_dir=symbols_dir,
+        extract=extract,
+        force=force,
+        user_agent=user_agent,
+    )
+
+    if json_output:
+        typer.echo(json.dumps(results, indent=2))
+        return
+
+    typer.echo("SEC Data Acquisition Completed:")
+    typer.echo(f"  Symbol Master JSON: {results['symbols']['json_path']}")
+    if results["symbols"]["master_parquet"]:
+        typer.echo(f"  Symbol Master Parquet: {results['symbols']['master_parquet']}")
+    typer.echo(f"  SHA-256 Digest: {results['symbols']['sha256']}")
+    typer.echo("  Quarters:")
+    for q_name, q_info in results["quarters"].items():
+        typer.echo(f"    - {q_name}:")
+        typer.echo(f"        Archive: {q_info['archive_path']}")
+        if q_info.get("extracted_path"):
+            typer.echo(f"        Extracted: {q_info['extracted_path']}")
+        typer.echo(f"        SHA-256: {q_info['sha256']}")
+        counts = q_info.get("row_counts", {})
+        typer.echo(
+            f"        Records: sub={counts.get('sub', 0):,}, num={counts.get('num', 0):,}, "
+            f"tag={counts.get('tag', 0):,}, pre={counts.get('pre', 0):,}"
+        )
+
+
+@app.command()
 def onboard(
     vendor: str = typer.Argument(..., help="Vendor identifier"),
     drop: str = typer.Argument(..., help="Path to raw drop directory or archive"),

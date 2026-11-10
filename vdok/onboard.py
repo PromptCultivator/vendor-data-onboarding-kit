@@ -102,7 +102,15 @@ def onboard_drop(
     # 5. Identifier symbol master resolution
     symbol_master: Optional[SymbolMaster] = None
     if symbol_master_path is not None and Path(symbol_master_path).exists():
-        symbol_master = SymbolMaster.load(symbol_master_path)
+        p_sym = Path(symbol_master_path)
+        if p_sym.suffix == ".json":
+            from vdok.symbols import build_symbol_master
+
+            out_dir = Path(store_dir) / "symbols"
+            master_path = build_symbol_master(p_sym, output_dir=out_dir)
+            symbol_master = SymbolMaster.load(master_path)
+        else:
+            symbol_master = SymbolMaster.load(p_sym)
     else:
         # Check standard symbol master locations
         candidates = [

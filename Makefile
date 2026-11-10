@@ -26,8 +26,10 @@ typecheck:
 test:
 	pytest --cov=vdok --cov-report=term-missing --cov-fail-under=85
 
+QUARTERS ?=
+
 data:
-	@echo "Data acquisition target configured for SEC FSDS range"
+	vdok data $(if $(QUARTERS),--quarters "$(QUARTERS)",)
 
 synth:
 	vdok synth --size-gb $(SIZE) --seed $(SEED) --faults $(FAULTS)

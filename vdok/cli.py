@@ -106,9 +106,6 @@ def schema_infer(
 
     p = Path(drop_path)
     if not p.exists():
-        if drop_path == "sample_drop/":
-            typer.echo(f"Schema infer: path={drop_path}")
-            return
         typer.echo(f"Error: Drop path does not exist: {drop_path}", err=True)
         raise typer.Exit(code=2)
 
@@ -135,17 +132,13 @@ def schema_infer(
 @schema_app.command("pin")
 def schema_pin(
     vendor: str = typer.Argument(..., help="Vendor identifier"),
-    drop_path: Optional[str] = typer.Argument(None, help="Path to drop directory or file to pin"),
+    drop_path: str = typer.Argument(..., help="Path to drop directory or file to pin"),
     schema_dir: str = typer.Option(
         "schemas", "--schema-dir", help="Directory where schemas are stored"
     ),
     output: Optional[str] = typer.Option(None, "--output", "-o", help="Explicit target file path"),
 ) -> None:
     """Pin current inferred schema for vendor to schemas/<vendor>.yaml."""
-    if drop_path is None:
-        typer.echo(f"Schema pin: vendor={vendor}")
-        return
-
     p = Path(drop_path)
     if not p.exists():
         typer.echo(f"Error: Drop path does not exist: {drop_path}", err=True)
@@ -176,10 +169,6 @@ def schema_check(
     ),
 ) -> None:
     """Check drop schema against pinned vendor schema."""
-    if drop_path == "sample_drop/":
-        typer.echo(f"Schema check: vendor={vendor}, path={drop_path}")
-        return
-
     schema_file = Path(schema_dir) / f"{vendor}.yaml"
     if not schema_file.exists():
         typer.echo(
@@ -239,9 +228,6 @@ def schema_accept(
     """Accept proposed schema changes for vendor."""
     schema_file = Path(schema_dir) / f"{vendor}.yaml"
     if not schema_file.exists():
-        if vendor == "sec_fsds" and drop_path is None:
-            typer.echo(f"Schema accept: vendor={vendor}")
-            return
         typer.echo(
             f"Error: Pinned schema not found for vendor '{vendor}' at {schema_file}.",
             err=True,

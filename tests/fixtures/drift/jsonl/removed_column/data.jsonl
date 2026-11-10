@@ -1,0 +1,10 @@
+{"entity_id": "AAPL", "event_time": "2024-01-15T14:30:00Z", "is_primary": true, "notes": null, "price": "182.5200", "record_id": 1001, "status": "ACTIVE", "trade_date": "2024-01-15"}
+{"entity_id": "MSFT", "event_time": "2024-01-15T14:30:00Z", "is_primary": false, "notes": "Quarterly rebalance", "price": "420.5500", "record_id": 1002, "status": "ACTIVE", "trade_date": "2024-01-15"}
+{"entity_id": "GOOGL", "event_time": "2024-01-16T15:00:00Z", "is_primary": true, "notes": null, "price": "175.2000", "record_id": 1003, "status": "PENDING", "trade_date": "2024-01-16"}
+{"entity_id": "AMZN", "event_time": "2024-01-16T15:30:00Z", "is_primary": false, "notes": "Circuit breaker test", "price": "178.7500", "record_id": 1004, "status": "HALTED", "trade_date": "2024-01-16"}
+{"entity_id": "0000320193", "event_time": "2024-01-17T16:00:00Z", "is_primary": true, "notes": null, "price": "999.9900", "record_id": 1005, "status": "ACTIVE", "trade_date": "2024-01-17"}
+{"entity_id": "NVDA", "event_time": "2024-01-17T16:00:00Z", "is_primary": true, "notes": "Split adjusted", "price": "875.2800", "record_id": 1006, "status": "ACTIVE", "trade_date": "2024-01-17"}
+{"entity_id": "META", "event_time": "2024-01-18T14:00:00Z", "is_primary": false, "notes": null, "price": "505.7500", "record_id": 1007, "status": "ACTIVE", "trade_date": "2024-01-18"}
+{"entity_id": "TSLA", "event_time": "2024-01-18T14:30:00Z", "is_primary": true, "notes": "High volatility warning", "price": "195.4000", "record_id": 1008, "status": "PENDING", "trade_date": "2024-01-18"}
+{"entity_id": "BRK.B", "event_time": "2024-01-19T15:00:00Z", "is_primary": false, "notes": null, "price": "410.1200", "record_id": 1009, "status": "ACTIVE", "trade_date": "2024-01-19"}
+{"entity_id": "JPM", "event_time": "2024-01-19T15:30:00Z", "is_primary": true, "notes": "Earnings release date confirmed", "price": "198.8000", "record_id": 1010, "status": "ACTIVE", "trade_date": "2024-01-19"}

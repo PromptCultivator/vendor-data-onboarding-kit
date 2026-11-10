@@ -1,0 +1,79 @@
+vendor: sec_fsds
+version: 1
+
+rules:
+  # Row-level rules
+  - name: not_null_entity_id
+    check: not_null
+    column: entity_id
+    severity: quarantine
+
+  - name: not_null_field
+    check: not_null
+    column: field
+    severity: quarantine
+
+  - name: not_null_event_time
+    check: not_null
+    column: event_time
+    severity: quarantine
+
+  - name: not_null_knowledge_time
+    check: not_null
+    column: knowledge_time
+    severity: quarantine
+
+  - name: plausible_event_time
+    check: temporal_bounds
+    column: event_time
+    min: "1990-01-01"
+    max: "drop_time + 1 day"
+    severity: quarantine
+
+  - name: knowledge_after_event
+    check: temporal_order
+    event_time_column: event_time
+    knowledge_time_column: knowledge_time
+    severity: quarantine
+
+  - name: allowed_units_sec
+    check: allowed_units
+    column: unit
+    units: ["USD", "shares", "pure", "ratio"]
+    allow_null: true
+    severity: quarantine
+
+  - name: decimal_scale_bound
+    check: decimal_scale
+    column: value_num
+    max_scale: 4
+    severity: warn
+
+  # Batch-level rules
+  - name: schema_drift_guard
+    check: schema_drift
+    disallowed: ["removed_column", "type_widened"]
+    severity: hold
+
+  - name: volume_stability
+    check: batch_volume
+    ratio_min: 0.5
+    ratio_max: 2.0
+    trailing_drops: 7
+    first_drop_exempt: true
+    severity: hold
+
+  - name: duplicate_threshold
+    check: batch_duplicate_ratio
+    key_columns: ["entity_id", "field", "event_time", "knowledge_time"]
+    max_ratio: 0.01
+    severity: hold
+
+  - name: redundant_drop_guard
+    check: byte_identical
+    severity: hold
+
+  - name: coverage_gap_guard
+    check: coverage_gap
+    max_missing_periods: 1
+    severity: hold

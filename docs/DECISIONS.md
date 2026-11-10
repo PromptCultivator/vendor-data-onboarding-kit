@@ -22,6 +22,9 @@ This document records explicit choices made when specifications offer implementa
 | D-014 | Format Sniffer Extension and Decompression Error Wrapping | 2026-11-10 | Accepted |
 | D-015 | Canonical Arrow and Pydantic Bitemporal Schema with Strict Decimal Float Rejection | 2026-11-10 | Accepted |
 | D-016 | Immutable Hash-Versioned Symbol Master and Deterministic Identifier Mapping | 2026-11-10 | Accepted |
+| D-017 | Multi-Reason Quarantine Aggregation via Vectorized DuckDB List Lambda | 2026-11-10 | Accepted |
+| D-018 | Window Ranking Materialization for Primary Key Duplicate Ratio and Escalation | 2026-11-10 | Accepted |
+| D-019 | Exact Decimal Scale Validation in DuckDB Without Floating Point Conversion | 2026-11-10 | Accepted |
 
 
 ---
@@ -238,6 +241,47 @@ This document records explicit choices made when specifications offer implementa
 - **Consequences:** Vendor entities with unrecognized abbreviations, typographical errors, or tickers not present in the SEC master cannot be resolved automatically; they remain flagged as unmapped and require human intervention or master updates.
 - **Test Guarantee Impact:** Verified by Hypothesis property tests (`test_symbols_properties.py`) and unit tests (`test_symbols.py`) confirming CIK padding invariants, ticker folding invariance, suffix stripping invariance, dual-class equivalence, version migration immutability, and 100% rejection of fuzzy matches.
 
+---
 
+### D-017: Multi-Reason Quarantine Aggregation via Vectorized DuckDB List Lambda
 
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.5 requires that rows failing validation rules are routed to quarantine with an array column `quarantine_reasons: list[str]` recording every violation triggered by that row (rather than halting on the first failure). Iterating row-by-row in Python is computationally slow and exceeds runtime budgets for multi-gigabyte drops.
+- **Options Considered:**
+  1. Row-by-row Python evaluation iterating through records and appending failure reason strings to a list.
+  2. Multiple SQL passes filtering rows for each rule and joining intermediate failure tables.
+  3. Single-pass vectorized SQL compiling each row predicate into a conditional expression (`CASE WHEN (<predicate>) THEN '<rule_name>' ELSE NULL END`), packing the results into a DuckDB array literal, and pruning null elements using DuckDB's native list lambda function: `list_filter([ ... ], lambda x: x IS NOT NULL)`.
+- **Decision:** Implement Option 3 in `RuleCompiler` and `ValidationEngine`. Every active row rule compiles into a CASE expression yielding either its rule identifier or NULL. All expressions are bundled into an array and filtered natively in DuckDB.
+- **Justification:** Vectorized list filtering executes entirely within DuckDB's C++ vectorized engine without transferring intermediate rows to Python. It produces complete multi-violation reason arrays in a single table scan, satisfying runtime budgets across large datasets.
+- **Consequences:** Rules must compile into valid DuckDB SQL boolean predicates. Quarantine schemas declare `quarantine_reasons` as `list_(pa.string())`.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_validate.py::test_combined_multiple_reasons` and `tests/unit/test_empirical_challenger2.py::test_simultaneous_multiple_row_failures`, proving rows failing multiple checks capture all triggered rule names in their quarantine reason list.
 
+---
+
+### D-018: Window Ranking Materialization for Primary Key Duplicate Ratio and Escalation
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.5 and Guarantee 4 require duplicate detection on the canonical primary key (`entity_id, field, event_time, knowledge_time`). If the duplicate share is less than or equal to 1.0% (0.01), duplicate rows are routed to quarantine while unique first-occurrence rows proceed to the valid dataset. If duplicate share exceeds 1.0%, the entire drop batch must be escalated to a HOLD status, halting main ingestion. Calculating duplicate counts and routing individual duplicates separately would require multiple window function evaluations over massive tables.
+- **Options Considered:**
+  1. Two separate window evaluations: one aggregation query (`COUNT(*) > 1`) to calculate batch duplicate ratio, and a subsequent window query during row routing to isolate duplicate records.
+  2. Sorting the table in Python to identify duplicate keys and computing fractions in memory.
+  3. Materializing a temporary DuckDB view `numbered` computing `ROW_NUMBER() OVER (PARTITION BY entity_id, field, event_time, knowledge_time ORDER BY source_file, source_row) AS _vdok_dup_rank` once. The duplicate count is queried directly from `numbered WHERE _vdok_dup_rank > 1`, and `_vdok_dup_rank > 1` is incorporated into the vectorized quarantine reason array as `'duplicate_key'`.
+- **Decision:** Implement Option 3. Materialize the window calculation once in temporary view `numbered`.
+- **Justification:** Computing the window function once avoids redundant partitioning and sorting passes over large datasets. The resulting integer rank `_vdok_dup_rank` directly drives both the batch-level escalation check (`dup_share > max_ratio`) and row-level quarantine routing (`_vdok_dup_rank > 1`). First occurrences (`_vdok_dup_rank = 1`) pass through to the valid relation if no other rule triggers quarantine.
+- **Consequences:** Drop sorting is deterministic using `source_file, source_row`. Memory overhead is restricted to an integer rank column during the temporary view lifetime.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_validate.py::test_batch_duplicate_ratio_escalation` and `tests/unit/test_planted_faults_50mb.py::test_50mb_planted_fault_duplicate_row`, confirming sub-threshold duplicates are quarantined while super-threshold duplicates trigger batch holds.
+
+---
+
+### D-019: Exact Decimal Scale Validation in DuckDB Without Floating Point Conversion
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.4, § 5.5, and Guarantee 5 mandate that monetary values maintain exact decimal representation and scale without ever passing through IEEE 754 floating point arithmetic. Validation rule `decimal_scale` must verify that numeric values in decimal columns do not exceed a configured fractional digit limit (such as 4 decimal places for securities pricing).
+- **Options Considered:**
+  1. Converting decimal values to Python `float` or SQL `DOUBLE` and inspecting modulo or string conversions.
+  2. Converting values to strings via `CAST(col AS VARCHAR)` and measuring substring length after the decimal separator.
+  3. Vectorized numeric comparison using DuckDB's exact decimal rounding: `ROUND(col, scale) != col`.
+- **Decision:** Implement Option 3. The rule compiler emits `({col} IS NOT NULL AND ROUND({col}, {scale}) != {col})`.
+- **Justification:** DuckDB executes `ROUND` directly on fixed-point `DECIMAL` types without intermediate floating point conversion. If a number contains fractional components beyond `scale` digits, `ROUND(col, scale)` differs from `col`, flagging the record. This maintains 100% adherence to the zero-float mandate of Section 13 while delivering high execution performance in SQL.
+- **Consequences:** Columns evaluated by `decimal_scale` must be numeric or Decimal representations in Arrow. Inputs outside the configured scale are quarantined with rule violation tags.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_validate.py::test_rule_decimal_scale_without_float` and `tests/unit/test_empirical_challenger2.py::test_decimal_scale_boundaries_and_precision`, confirming boundary scale values without float conversion.

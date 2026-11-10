@@ -33,6 +33,9 @@ This document records explicit choices made when specifications offer implementa
 | D-025 | Dual-Path Fallback for ISO-8601 and Delimited Timestamp Ingestion | 2026-11-10 | Accepted |
 | D-026 | Deterministic Multi-Tie Breaking and Relation Separation for Diff and Readiness Reports | 2026-11-10 | Accepted |
 | D-027 | Thread-Safe SEC EDGAR Rate Limiting and Atomic Ingestion Caching | 2026-11-10 | Accepted |
+| D-028 | Vectorized DuckDB Normalization and Tolerant Schema Sampling for Multi-Million-Row Feeds | 2026-11-10 | Accepted |
+| D-029 | Sorted Partition MD5 Prefix Index and Unpruned Streaming Reference Oracle | 2026-11-10 | Accepted |
+| D-030 | Per-Iteration Subprocess Isolation for Process-Tree Peak RSS Measurement | 2026-11-10 | Accepted |
 
 
 ---
@@ -403,4 +406,44 @@ This document records explicit choices made when specifications offer implementa
 - **Decision:** Implement Option 2 in `vdok/adapters/sec_fsds.py`.
 - **Justification:** SEC EDGAR strictly blocks IP addresses that exceed 10 requests per second or fail User-Agent identification standards. Enforcing atomic streaming and sidecar hashing prevents corrupted partial archives from entering the store while eliminating duplicate downloads.
 - **Test Guarantee Impact:** Verified by `tests/unit/test_sec_fsds.py` (rate limiting, User-Agent formatting, hash caching, and real download of 2023q3).
+
+---
+
+### D-028: Vectorized DuckDB Normalization and Tolerant Schema Sampling for Multi-Million-Row Feeds
+
+- **Date:** 2026-11-10
+- **Context:** Real quarterly SEC FSDS archives contain over 3.5 million numeric records alongside companion documentation (`readme.htm`), alphanumeric postal codes (`zipba`, `zipma`), and comparative footnote periods spanning multiple decades. Additionally, synthetic multi-drop benchmarks inject isolated cell-level string corruptions (`10` cells in `200,000+` rows) that must route to row-level `type_flip` quarantine rather than triggering a batch-level `type_widened` hold.
+- **Options Considered:**
+  1. Row-by-row Python normalization and zero-tolerance scalar type inference on every cell in a 200,000-row sample.
+  2. Vectorized DuckDB SQL normalization (`all_varchar=True`, exact `DECIMAL(38, 9)` casting, distinct entity lookup joins, and bit-identical `sha256` row hashing), non-data sidecar filtering during directory discovery, `≤ 1.0%` cell-anomaly tolerance on samples with `≥ 100` non-null values during schema drift checks, and evaluating `COVERAGE_GAP` after row-level quarantine predicates.
+- **Decision:** Implement Option 2 across `vdok/adapters/sec_fsds.py`, `vdok/normalize.py`, `vdok/discover.py`, `vdok/schema.py`, and `vdok/validate.py`.
+- **Justification:** Vectorized normalization reduces 3.5-million-row SEC ingestion to ~13 seconds without floating-point intermediaries, while `≤ 1.0%` sample tolerance distinguishes cell-level data defects (routed to `quarantine.parquet`) from column-wide vendor type widening (held at the schema gate).
+- **Test Guarantee Impact:** Verified by `tests/golden/test_report_goldens.py`, `tests/unit/test_planted_faults_50mb.py`, and real SEC `2023q3`/`2023q4` onboarding runs.
+
+---
+
+### D-029: Sorted Partition MD5 Prefix Index and Unpruned Streaming Reference Oracle
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 8 requires executing 100,000 random `Store.value()` point-in-time queries per benchmark iteration and asserting zero violations against a brute-force reference implementation that scans all stored rows without exceeding single-node memory limits.
+- **Options Considered:**
+  1. Execute 100,000 individual DuckDB `read_parquet` SQL queries per iteration and materialize the entire multi-million-row store as Python dictionaries in `BruteForceStore`.
+  2. Cache per-partition `(bucket, year)` Arrow tables sorted by 64-bit unsigned MD5 key prefix (`_k64 ASC, knowledge_time DESC, drop_id DESC`) queried via `bisect_left` over zero-copy `memoryview` scalar buffers (bounded by a 2 GiB cache budget), and verify batch results against `BruteForceStore.batch_values_unpruned`, which streams every data Parquet file across all buckets and years via PyArrow `ParquetFile.iter_batches` with zero directory pruning, zero SQL, and zero hash indexing.
+- **Decision:** Implement Option 2 in `vdok/query.py`.
+- **Justification:** Binary search over sorted 8-byte scalar buffers answers 100,000 `Store.value()` calls in sub-second wall time while enforcing `knowledge_time ≤ as_of` (G2), and the unpruned streaming PyArrow reference oracle independently checks every stored Parquet batch in bounded memory.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_guarantees.py`, `tests/property/test_store_properties.py`, and `tests/unit/test_bench.py` (0 violations across 100,000 queries per run).
+
+---
+
+### D-030: Per-Iteration Subprocess Isolation for Process-Tree Peak RSS Measurement
+
+- **Date:** 2026-11-10
+- **Context:** POSIX `resource.getrusage` reports a monotonically non-decreasing lifetime maximum resident set size (`ru_maxrss`) per OS process, and native C++ allocators in DuckDB and PyArrow retain virtual and resident memory arenas across in-process loops.
+- **Options Considered:**
+  1. Run all `RUNS` benchmark iterations inside a single Python process.
+  2. Spawn a dedicated child Python subprocess (`--internal-worker`) for each benchmark iteration, recording `(RUSAGE_SELF + RUSAGE_CHILDREN)` peak RSS inside the isolated worker and removing temporary store artifacts between runs.
+- **Decision:** Implement Option 2 in `bench/run.py`.
+- **Justification:** Guarantees that every iteration reports an independent OS kernel resident memory high-water mark and reclaims all native C++ memory pages before the next run starts.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_bench.py::test_bench_cli_subprocess_entrypoint` and multi-run `make bench` executions.
+
 

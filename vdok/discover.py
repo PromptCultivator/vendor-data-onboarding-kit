@@ -272,11 +272,17 @@ def scan(path: Path | str) -> DropMetadata:
         root_dir = target.parent
     else:
         root_dir = target
+        ignored_suffixes = (".htm", ".html", ".md", ".sha256", ".md5", ".tmp")
         for p in target.rglob("*"):
             if not p.is_file():
                 continue
-            # Skip hidden files and temp files
-            if p.name.startswith(".") or p.name.endswith("~") or p.name.endswith(".tmp"):
+            # Skip hidden files, temp files, and companion docs/checksums
+            lower_name = p.name.lower()
+            if (
+                p.name.startswith(".")
+                or p.name.endswith("~")
+                or lower_name.endswith(ignored_suffixes)
+            ):
                 continue
             candidate_files.append(p)
 

@@ -18,7 +18,6 @@ import threading
 import time
 import urllib.request
 import zipfile
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +25,7 @@ import duckdb
 import pyarrow as pa
 
 from vdok.manifest import VendorManifest
-from vdok.normalize import CANONICAL_ARROW_SCHEMA, compute_row_hash, normalize_unit
+from vdok.normalize import CANONICAL_ARROW_SCHEMA, normalize_unit
 from vdok.symbols import SymbolMaster, build_symbol_master
 
 
@@ -329,144 +328,190 @@ def normalize_sec_fsds_drop(
             )
 
         con = duckdb.connect()
-        query = f"""
-        SELECT
-            trim(sub.cik::VARCHAR) AS raw_cik,
-            trim(sub.adsh::VARCHAR) AS adsh,
-            trim(sub.filed::VARCHAR) AS filed,
-            trim(num.tag::VARCHAR) AS tag,
-            trim(coalesce(num.version::VARCHAR, '')) AS version,
-            trim(coalesce(num.coreg::VARCHAR, '')) AS coreg,
-            trim(num.ddate::VARCHAR) AS ddate,
-            trim(coalesce(num.qtrs::VARCHAR, '0')) AS qtrs,
-            trim(coalesce(num.uom::VARCHAR, '')) AS uom,
-            trim(num.value::VARCHAR) AS raw_value,
-            row_number() OVER () AS src_row
-        FROM read_csv('{sub_file}', delim='\t', header=True, all_varchar=True) sub
-        JOIN read_csv('{num_file}', delim='\t', header=True, all_varchar=True) num
-          ON trim(sub.adsh::VARCHAR) = trim(num.adsh::VARCHAR)
-        WHERE num.value IS NOT NULL AND trim(num.value::VARCHAR) != ''
-        """
+        try:
+            con.execute("SET TimeZone = 'UTC';")
+            sub_escaped = sub_file.replace("'", "''")
+            num_escaped = num_file.replace("'", "''")
 
-        res = con.sql(query).to_arrow_table()
-        con.close()
-
-        rows = res.to_pylist()
-        if not rows:
-            return CANONICAL_ARROW_SCHEMA.empty_table()
-
-        records: list[dict[str, Any]] = []
-
-        for r in rows:
-            raw_cik = str(r["raw_cik"]).strip()
-            padded_cik = raw_cik.zfill(10)
-            coreg = str(r["coreg"]).strip() if r.get("coreg") else ""
-
-            if coreg:
-                entity_id = f"{padded_cik}|coreg={coreg}"
-            else:
-                entity_id = padded_cik
-
-            is_unmapped = False
-            if symbol_master is not None:
-                resolved_id, is_unmapped = symbol_master.resolve(
-                    raw_id=padded_cik, id_type=manifest.entity_id_type
-                )
-                if coreg:
-                    entity_id = f"{resolved_id}|coreg={coreg}"
-                else:
-                    entity_id = resolved_id
-
-            tag = str(r["tag"]).strip()
-            uom = str(r["uom"]).strip() if r.get("uom") else ""
-            qtrs = str(r["qtrs"]).strip() if r.get("qtrs") else "0"
-            field_name = f"{tag}|{uom}|{qtrs}"
-
-            # Parse event time (ddate: YYYYMMDD or YYYY-MM-DD)
-            ddate_str = str(r["ddate"]).strip()
-            event_dt: datetime.datetime | None = None
-            if len(ddate_str) == 8 and ddate_str.isdigit():
-                try:
-                    event_dt = datetime.datetime(
-                        int(ddate_str[:4]),
-                        int(ddate_str[4:6]),
-                        int(ddate_str[6:8]),
-                        tzinfo=datetime.timezone.utc,
-                    )
-                except ValueError:
-                    pass
-            if event_dt is None:
-                try:
-                    event_dt = datetime.datetime.fromisoformat(ddate_str[:10]).replace(
-                        tzinfo=datetime.timezone.utc
-                    )
-                except ValueError:
-                    continue
-
-            # Parse knowledge time (filed: YYYYMMDD or YYYY-MM-DD)
-            filed_str = str(r["filed"]).strip()
-            kt_dt: datetime.datetime | None = None
-            if len(filed_str) == 8 and filed_str.isdigit():
-                try:
-                    kt_dt = datetime.datetime(
-                        int(filed_str[:4]),
-                        int(filed_str[4:6]),
-                        int(filed_str[6:8]),
-                        tzinfo=datetime.timezone.utc,
-                    )
-                except ValueError:
-                    pass
-            if kt_dt is None:
-                try:
-                    kt_dt = datetime.datetime.fromisoformat(filed_str[:10]).replace(
-                        tzinfo=datetime.timezone.utc
-                    )
-                except ValueError:
-                    kt_dt = (
-                        as_of if as_of is not None else datetime.datetime.now(datetime.timezone.utc)
-                    )
-
-            raw_val = str(r["raw_value"]).strip()
-            try:
-                val_num = Decimal(raw_val)
-                val_str = None
-            except Exception:
-                val_num = None
-                val_str = raw_val
-
-            mapped_unit = normalize_unit(uom) if uom else None
-
-            r_hash = compute_row_hash(
-                entity_id=entity_id,
-                field=field_name,
-                event_time=event_dt,
-                value_num=val_num,
-                value_str=val_str,
-                unit=mapped_unit,
+            num_cols = [
+                c.lower()
+                for c in con.sql(
+                    f"SELECT * FROM read_csv('{num_escaped}', "
+                    "delim='\t', header=True, all_varchar=True) LIMIT 0"
+                ).columns
+            ]
+            has_segments = "segments" in num_cols
+            seg_expr = (
+                "trim(coalesce(num.segments::VARCHAR, ''))" if has_segments else "''::VARCHAR"
             )
 
-            records.append(
+            # Build distinct CIK lookup table (~50 to ~7,500 distinct CIKs)
+            distinct_ciks = [
+                str(r[0]).strip()
+                for r in con.sql(
+                    f"SELECT DISTINCT trim(cik::VARCHAR) FROM read_csv('{sub_escaped}', "
+                    "delim='\t', header=True, all_varchar=True) WHERE cik IS NOT NULL"
+                ).fetchall()
+            ]
+            if not distinct_ciks:
+                return CANONICAL_ARROW_SCHEMA.empty_table()
+
+            raw_ciks_col: list[str] = []
+            resolved_ciks_col: list[str] = []
+            unmapped_col: list[bool] = []
+            for rc in distinct_ciks:
+                padded = rc.zfill(10)
+                if symbol_master is not None:
+                    res_id, is_unmap = symbol_master.resolve(
+                        raw_id=padded, id_type=manifest.entity_id_type
+                    )
+                else:
+                    res_id, is_unmap = padded, False
+                raw_ciks_col.append(rc)
+                resolved_ciks_col.append(res_id)
+                unmapped_col.append(is_unmap)
+
+            cik_map_tbl = pa.table(
                 {
-                    "entity_id": entity_id,
-                    "entity_id_type": manifest.entity_id_type.value,
-                    "field": field_name,
-                    "event_time": event_dt,
-                    "knowledge_time": kt_dt,
-                    "value_num": val_num,
-                    "value_str": val_str,
-                    "unit": mapped_unit,
-                    "drop_id": drop_id,
-                    "source_file": Path(num_file).name,
-                    "source_row": int(r["src_row"]),
-                    "row_hash": r_hash,
-                    "unmapped": is_unmapped,
+                    "raw_cik": pa.array(raw_ciks_col, type=pa.string()),
+                    "resolved_cik": pa.array(resolved_ciks_col, type=pa.string()),
+                    "is_unmapped": pa.array(unmapped_col, type=pa.bool_()),
                 }
             )
+            con.register("cik_map_tbl", cik_map_tbl)
 
-        if not records:
-            return CANONICAL_ARROW_SCHEMA.empty_table()
+            # Build distinct UOM lookup table (~50 distinct units)
+            distinct_uoms = [
+                str(r[0]).strip() if r[0] is not None else ""
+                for r in con.sql(
+                    f"SELECT DISTINCT trim(coalesce(uom::VARCHAR, '')) FROM "
+                    f"read_csv('{num_escaped}', delim='\t', header=True, all_varchar=True)"
+                ).fetchall()
+            ]
+            uom_keys: list[str] = []
+            uom_vals: list[str | None] = []
+            for u in distinct_uoms:
+                uom_keys.append(u)
+                uom_vals.append(normalize_unit(u) if u else None)
+            uom_map_tbl = pa.table(
+                {
+                    "raw_uom": pa.array(uom_keys, type=pa.string()),
+                    "mapped_unit": pa.array(uom_vals, type=pa.string()),
+                }
+            )
+            con.register("uom_map_tbl", uom_map_tbl)
 
-        return pa.Table.from_pylist(records, schema=CANONICAL_ARROW_SCHEMA)
+            default_kt = (
+                as_of.astimezone(datetime.timezone.utc)
+                if as_of is not None
+                else datetime.datetime.now(datetime.timezone.utc)
+            )
+            default_kt_iso = default_kt.strftime("%Y-%m-%d %H:%M:%S.%f+00")
+            drop_id_escaped = drop_id.replace("'", "''")
+            src_file_escaped = Path(num_file).name.replace("'", "''")
+            id_type_escaped = manifest.entity_id_type.value.replace("'", "''")
+
+            sql = f"""
+            WITH joined AS (
+                SELECT
+                    trim(sub.cik::VARCHAR) AS raw_cik,
+                    trim(sub.filed::VARCHAR) AS filed,
+                    trim(num.tag::VARCHAR) AS tag,
+                    trim(coalesce(num.coreg::VARCHAR, '')) AS coreg,
+                    trim(num.ddate::VARCHAR) AS ddate,
+                    CASE
+                        WHEN trim(coalesce(num.qtrs::VARCHAR, '')) = '' THEN '0'
+                        ELSE trim(num.qtrs::VARCHAR)
+                    END AS qtrs,
+                    trim(coalesce(num.uom::VARCHAR, '')) AS uom,
+                    {seg_expr} AS seg,
+                    trim(num.value::VARCHAR) AS raw_value,
+                    row_number() OVER () AS src_row
+                FROM read_csv('{sub_escaped}', delim='\t', header=True, all_varchar=True) sub
+                JOIN read_csv('{num_escaped}', delim='\t', header=True, all_varchar=True) num
+                  ON trim(sub.adsh::VARCHAR) = trim(num.adsh::VARCHAR)
+                WHERE num.value IS NOT NULL AND trim(num.value::VARCHAR) != ''
+            ),
+            parsed AS (
+                SELECT
+                    CASE
+                        WHEN j.coreg != '' THEN cm.resolved_cik || '|coreg=' || j.coreg
+                        ELSE cm.resolved_cik
+                    END AS entity_id,
+                    '{id_type_escaped}' AS entity_id_type,
+                    CASE
+                        WHEN j.seg != ''
+                        THEN j.tag || '|' || j.uom || '|' || j.qtrs || '|' || j.seg
+                        ELSE j.tag || '|' || j.uom || '|' || j.qtrs
+                    END AS field,
+                    COALESCE(
+                        CASE
+                            WHEN length(j.ddate) = 8 AND regexp_matches(j.ddate, '^[0-9]{{8}}$')
+                            THEN try_strptime(j.ddate, '%Y%m%d')
+                            ELSE NULL
+                        END,
+                        try_strptime(substring(j.ddate, 1, 10), '%Y-%m-%d')
+                    )::TIMESTAMPTZ AS event_time,
+                    COALESCE(
+                        COALESCE(
+                            CASE
+                                WHEN length(j.filed) = 8 AND regexp_matches(j.filed, '^[0-9]{{8}}$')
+                                THEN try_strptime(j.filed, '%Y%m%d')
+                                ELSE NULL
+                            END,
+                            try_strptime(substring(j.filed, 1, 10), '%Y-%m-%d')
+                        )::TIMESTAMPTZ,
+                        '{default_kt_iso}'::TIMESTAMPTZ
+                    ) AS knowledge_time,
+                    TRY_CAST(j.raw_value AS DECIMAL(38, 9)) AS value_num,
+                    CASE
+                        WHEN TRY_CAST(j.raw_value AS DECIMAL(38, 9)) IS NULL THEN j.raw_value
+                        ELSE NULL
+                    END AS value_str,
+                    um.mapped_unit AS unit,
+                    '{drop_id_escaped}' AS drop_id,
+                    '{src_file_escaped}' AS source_file,
+                    j.src_row::BIGINT AS source_row,
+                    cm.is_unmapped AS unmapped
+                FROM joined j
+                JOIN cik_map_tbl cm ON j.raw_cik = cm.raw_cik
+                LEFT JOIN uom_map_tbl um ON j.uom = um.raw_uom
+            )
+            SELECT
+                entity_id,
+                entity_id_type,
+                field,
+                event_time,
+                knowledge_time,
+                value_num,
+                value_str,
+                unit,
+                drop_id,
+                source_file,
+                source_row,
+                sha256(
+                    (
+                        entity_id || chr(0) ||
+                        field || chr(0) ||
+                        strftime(
+                            event_time AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S.%fZ'
+                        ) || chr(0) ||
+                        COALESCE(CAST(value_num AS VARCHAR), '') || chr(0) ||
+                        COALESCE(value_str, '') || chr(0) ||
+                        COALESCE(unit, '')
+                    )::BLOB
+                ) AS row_hash,
+                unmapped
+            FROM parsed
+            WHERE event_time IS NOT NULL
+            ORDER BY source_row
+            """
+            arrow_tbl = con.sql(sql).to_arrow_table()
+            if len(arrow_tbl) == 0:
+                return CANONICAL_ARROW_SCHEMA.empty_table()
+            return arrow_tbl.cast(CANONICAL_ARROW_SCHEMA)
+        finally:
+            con.close()
     finally:
         if temp_dir is not None:
             temp_dir.cleanup()

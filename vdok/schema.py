@@ -178,18 +178,24 @@ def _infer_column_from_values(
             max=None,
         )
 
+    # Allow up to 1% cell-level corruptions on large (>= 100 non-null) numeric columns
+    # so row-level type_flip quarantine isolates cell defects rather than batch-holding
+    max_numeric_anomalies = int(len(non_null) * 0.01) if len(non_null) >= 100 else 0
+
     # 2. Check integer
-    all_int = True
+    int_vals: list[int] = []
+    non_int_count = 0
     for v in non_null:
         if isinstance(v, int) and not isinstance(v, bool):
-            continue
-        if isinstance(v, str) and _INT_PATTERN.match(v.strip()):
-            continue
-        all_int = False
-        break
+            int_vals.append(v)
+        elif isinstance(v, str) and _INT_PATTERN.match(v.strip()):
+            int_vals.append(int(v.strip()))
+        else:
+            non_int_count += 1
+            if non_int_count > max_numeric_anomalies:
+                break
 
-    if all_int:
-        int_vals = [int(v) for v in non_null]
+    if non_int_count <= max_numeric_anomalies and int_vals:
         return ColumnSchema(
             type=InferredType.INTEGER,
             nullable=nullable,
@@ -253,7 +259,8 @@ def _infer_column_from_values(
         )
 
     # 5. Check decimal and float
-    all_numeric = True
+    non_num_count = 0
+    valid_numeric_raw: list[Any] = []
     max_scale = 0
     max_precision = 0
     for v in non_null:
@@ -261,6 +268,7 @@ def _infer_column_from_values(
             cur_prec, cur_scale = _decimal_prec_scale(v)
             max_scale = max(max_scale, cur_scale)
             max_precision = max(max_precision, cur_prec)
+            valid_numeric_raw.append(v)
             continue
         if isinstance(v, (int, float)):
             s = f"{v:.9f}".rstrip("0").rstrip(".")
@@ -268,6 +276,7 @@ def _infer_column_from_values(
                 cur_prec, cur_scale = _decimal_prec_scale(Decimal(s))
                 max_scale = max(max_scale, cur_scale)
                 max_precision = max(max_precision, cur_prec)
+                valid_numeric_raw.append(v)
                 continue
             except InvalidOperation:
                 pass
@@ -276,16 +285,20 @@ def _infer_column_from_values(
                 cur_prec, cur_scale = _decimal_prec_scale(Decimal(v.strip()))
                 max_scale = max(max_scale, cur_scale)
                 max_precision = max(max_precision, cur_prec)
+                valid_numeric_raw.append(v)
                 continue
             except InvalidOperation:
                 pass
-        all_numeric = False
-        break
+        non_num_count += 1
+        if non_num_count > max_numeric_anomalies:
+            break
 
-    if all_numeric:
+    if non_num_count <= max_numeric_anomalies and valid_numeric_raw:
         # Enforce exact decimal for money fields; allow float for non-money continuous fields
-        if is_money or any(isinstance(v, Decimal) for v in non_null):
-            dec_vals = [v if isinstance(v, Decimal) else Decimal(str(v).strip()) for v in non_null]
+        if is_money or any(isinstance(v, Decimal) for v in valid_numeric_raw):
+            dec_vals = [
+                v if isinstance(v, Decimal) else Decimal(str(v).strip()) for v in valid_numeric_raw
+            ]
             final_precision = max(max_precision, 18)
             final_scale = max(max_scale, 4)
             return ColumnSchema(
@@ -297,7 +310,7 @@ def _infer_column_from_values(
                 precision=final_precision,
                 scale=final_scale,
             )
-        float_vals = [float(v) for v in non_null]
+        float_vals = [float(v) for v in valid_numeric_raw]
         return ColumnSchema(
             type=InferredType.FLOAT,
             nullable=nullable,
@@ -559,9 +572,16 @@ _WIDENING_TRANSITIONS: set[tuple[InferredType, InferredType]] = {
 
 _NARROWING_TRANSITIONS: set[tuple[InferredType, InferredType]] = {
     (InferredType.FLOAT, InferredType.INTEGER),
+    (InferredType.FLOAT, InferredType.DECIMAL),
     (InferredType.DECIMAL, InferredType.INTEGER),
     (InferredType.STRING, InferredType.DATE),
     (InferredType.STRING, InferredType.DATETIME),
+    (InferredType.STRING, InferredType.INTEGER),
+    (InferredType.STRING, InferredType.FLOAT),
+    (InferredType.STRING, InferredType.DECIMAL),
+    (InferredType.STRING, InferredType.BOOLEAN),
+    (InferredType.DATETIME, InferredType.DATE),
+    (InferredType.INTEGER, InferredType.BOOLEAN),
 }
 
 

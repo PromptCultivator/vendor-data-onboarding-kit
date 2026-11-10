@@ -32,7 +32,7 @@ Adopt **Option 3 (Inferred, Versioned, and Pinned Contract with Drift Guard)**.
 - Initial onboarding creates `schemas/<vendor>.yaml`.
 - Subsequent drops check for:
   - `removed_column`: Batch `hold`.
-  - `type_widened`: Batch `hold`.
+  - `type_widened`: Batch `hold` when more than `1.0%` of non-null sampled values (or any value on samples below `100` rows) widen the column's scalar type; isolated cell corruptions (`≤ 1.0%` on samples of `≥ 100` rows) retain the narrow contract type so row-level validation routes the defective cells to `quarantine`.
   - `added_column`: Logged as `warn`.
   - `type_narrowed`: Logged as `warn`.
   - `nullability_change`: Logged as `warn` with affected rows sent to quarantine.

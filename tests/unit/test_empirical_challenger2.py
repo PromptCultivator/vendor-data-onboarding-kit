@@ -605,12 +605,28 @@ def test_section_12_prohibited_vocabulary_absence() -> None:
     violations: list[str] = []
 
     this_file = Path(__file__).resolve()
-    for root_dir in ["vdok", "rules", "tests", "manifests", "schemas", "bench"]:
-        for p in Path(root_dir).rglob("*"):
+    spec_file = Path("docs/SPEC.md").resolve()
+    scan_dirs = [
+        ".github",
+        "vdok",
+        "rules",
+        "tests",
+        "manifests",
+        "schemas",
+        "bench",
+        "scripts",
+        "docs",
+    ]
+
+    for root_dir in scan_dirs:
+        root_path = Path(root_dir)
+        if not root_path.exists():
+            continue
+        for p in root_path.rglob("*"):
             if (
                 p.is_file()
-                and p.resolve() != this_file
-                and p.suffix in (".py", ".yaml", ".yml", ".md")
+                and p.resolve() not in (this_file, spec_file)
+                and p.suffix in (".py", ".yaml", ".yml", ".md", ".csv")
             ):
                 text = p.read_text(encoding="utf-8", errors="ignore")
                 for line_no, line in enumerate(text.splitlines(), 1):
@@ -620,13 +636,44 @@ def test_section_12_prohibited_vocabulary_absence() -> None:
                             f"{p}:{line_no}: banned '{m.group(0)}' in: {line.strip()}"
                         )
 
-    for f in Path("docs").glob("*.md"):
-        if f.name == "SPEC.md":
-            continue
-        text = f.read_text(encoding="utf-8", errors="ignore")
-        for line_no, line in enumerate(text.splitlines(), 1):
-            m = banned.search(line)
-            if m:
-                violations.append(f"{f}:{line_no}: banned '{m.group(0)}' in: {line.strip()}")
+    for top_file in ("README.md", "Dockerfile", "Makefile", "pyproject.toml"):
+        top_path = Path(top_file)
+        if top_path.exists():
+            text = top_path.read_text(encoding="utf-8", errors="ignore")
+            for line_no, line in enumerate(text.splitlines(), 1):
+                m = banned.search(line)
+                if m:
+                    violations.append(
+                        f"{top_file}:{line_no}: banned '{m.group(0)}' in: {line.strip()}"
+                    )
 
     assert not violations, "Prohibited vocabulary violations detected:\n" + "\n".join(violations)
+
+
+def test_markdown_uses_unicode_not_latex_math() -> None:
+    """Verify project Markdown files use Unicode symbols instead of LaTeX math delimiters."""
+    latex_inline_or_block = re.compile(r"\$\$|(?<!\\)\$[^\s$][^$\n]*(?<!\\)\$")
+    violations: list[str] = []
+
+    md_files: list[Path] = []
+    if Path("README.md").exists():
+        md_files.append(Path("README.md"))
+    for root_dir in ["docs", "bench", "tests"]:
+        rp = Path(root_dir)
+        if rp.exists():
+            md_files.extend(p for p in rp.rglob("*.md") if p.name != "SPEC.md")
+
+    for md_path in sorted(set(md_files)):
+        in_fence = False
+        for line_no, line in enumerate(md_path.read_text(encoding="utf-8").splitlines(), 1):
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+            cleaned = re.sub(r"`[^`]*`", "", line)
+            if latex_inline_or_block.search(cleaned):
+                violations.append(f"{md_path}:{line_no}: LaTeX math delimiter in: {stripped}")
+
+    assert not violations, "LaTeX math notation detected in Markdown:\n" + "\n".join(violations)

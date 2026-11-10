@@ -299,6 +299,332 @@ class CanonicalRow(BaseModel):
         return self
 
 
+def _quote_ident(name: str) -> str:
+    """Quote SQL identifier safely for DuckDB."""
+    return '"' + name.replace('"', '""') + '"'
+
+
+def _build_ts_sql(col_ident: str, fmt: str | None) -> str:
+    """Build UTC timestamp SQL expression matching parse_timestamp_utc."""
+    candidates: list[str] = []
+    if fmt:
+        fmt_esc = fmt.replace("'", "''")
+        candidates.append(f"try_strptime(trim({col_ident}::VARCHAR), '{fmt_esc}')::TIMESTAMPTZ")
+    candidates.append(f"TRY_CAST(trim({col_ident}::VARCHAR) AS TIMESTAMPTZ)")
+    return f"COALESCE({', '.join(candidates)})"
+
+
+def _normalize_drop_vectorized(
+    drop_meta: Any,
+    manifest: VendorManifest,
+    drop_id: str,
+    symbol_master: SymbolMaster | None,
+    default_drop_kt: datetime.datetime,
+) -> pa.Table | None:
+    """Vectorized DuckDB normalization fast-path for UTC CSV and Parquet drops.
+
+    Returns None when custom non-UTC timezone or non-ISO dateutil fallback is needed.
+    """
+    if manifest.timezone.upper() not in ("UTC", "ETC/UTC", "Z", "GMT"):
+        return None
+    if drop_meta.file_format not in (FileFormat.CSV, FileFormat.PARQUET):
+        return None
+
+    if drop_meta.file_format == FileFormat.PARQUET:
+        for df in drop_meta.files:
+            pq_schema = pq.read_schema(df.path)
+            for vc in manifest.value_columns:
+                if vc in pq_schema.names and pa.types.is_floating(pq_schema.field(vc).type):
+                    return None
+
+    tables: list[pa.Table] = []
+    default_kt_iso = default_drop_kt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S.%f+00")
+    drop_id_esc = drop_id.replace("'", "''")
+    id_type_esc = manifest.entity_id_type.value.replace("'", "''")
+
+    for disc_file in drop_meta.files:
+        f_path = disc_file.path
+        rel_esc = disc_file.relative_path.replace("'", "''")
+        path_esc = str(f_path).replace("'", "''")
+
+        con = duckdb.connect()
+        try:
+            con.execute("SET TimeZone = 'UTC';")
+            if disc_file.format == FileFormat.CSV:
+                src_sql = f"read_csv('{path_esc}', all_varchar=True)"
+            else:
+                src_sql = f"read_parquet('{path_esc}')"
+
+            avail_cols = set(con.sql(f"SELECT * FROM {src_sql} LIMIT 0").columns)
+            ent_cols = [c for c in manifest.entity_columns if c in avail_cols]
+            if not ent_cols or manifest.event_time_column not in avail_cols:
+                continue
+
+            if manifest.knowledge_time.source == KnowledgeTimeSource.COLUMN:
+                kt_col = manifest.knowledge_time.column
+                if not kt_col or kt_col not in avail_cols:
+                    continue
+            else:
+                kt_col = None
+
+            ent_parts = [f"NULLIF(trim({_quote_ident(c)}::VARCHAR), '')" for c in ent_cols]
+            ent_expr = f"COALESCE({', '.join(ent_parts)})" if len(ent_parts) > 1 else ent_parts[0]
+
+            ev_ident = _quote_ident(manifest.event_time_column)
+            ev_ts_expr = _build_ts_sql(ev_ident, manifest.event_time_format)
+
+            if kt_col is not None:
+                kt_ident = _quote_ident(kt_col)
+                kt_ts_expr = _build_ts_sql(kt_ident, manifest.knowledge_time.format)
+                kt_null_filter = f"{kt_ident} IS NOT NULL"
+                kt_fail_check = (
+                    f"({kt_ident} IS NOT NULL AND trim({kt_ident}::VARCHAR) != '' "
+                    f"AND {kt_ts_expr} IS NULL)"
+                )
+            else:
+                kt_ts_expr = f"'{default_kt_iso}'::TIMESTAMPTZ"
+                kt_null_filter = "TRUE"
+                kt_fail_check = "FALSE"
+
+            con.execute(
+                f"""
+                CREATE TEMP TABLE raw_numbered AS
+                SELECT *, row_number() OVER () AS _vdok_src_row, {ent_expr} AS _vdok_raw_ent
+                FROM {src_sql}
+                """
+            )
+
+            # Check if any non-empty timestamp requires Python dateutil fallback
+            ts_fail_rows = con.sql(
+                f"""
+                SELECT count(*) FROM raw_numbered
+                WHERE _vdok_raw_ent IS NOT NULL
+                  AND (
+                      ({ev_ident} IS NOT NULL AND trim({ev_ident}::VARCHAR) != ''
+                       AND {ev_ts_expr} IS NULL)
+                      OR {kt_fail_check}
+                  )
+                """
+            ).fetchall()
+            if ts_fail_rows and int(ts_fail_rows[0][0]) > 0:
+                return None
+
+            # Resolve distinct entity IDs via exact Python SymbolMaster / normalize_identifier
+            distinct_ents = [
+                str(r[0])
+                for r in con.sql(
+                    "SELECT DISTINCT _vdok_raw_ent FROM raw_numbered "
+                    "WHERE _vdok_raw_ent IS NOT NULL"
+                ).fetchall()
+            ]
+            if not distinct_ents:
+                continue
+
+            raw_e_list: list[str] = []
+            res_e_list: list[str] = []
+            unmap_list: list[bool] = []
+            for e in distinct_ents:
+                if symbol_master is not None:
+                    res_id, is_unmap = symbol_master.resolve(
+                        raw_id=e, id_type=manifest.entity_id_type
+                    )
+                else:
+                    try:
+                        res_id = normalize_identifier(e, id_type=manifest.entity_id_type)
+                    except ValueError:
+                        return None
+                    is_unmap = False
+                raw_e_list.append(e)
+                res_e_list.append(res_id)
+                unmap_list.append(is_unmap)
+
+            con.register(
+                "ent_map_tbl",
+                pa.table(
+                    {
+                        "_raw_ent": pa.array(raw_e_list, type=pa.string()),
+                        "_res_ent": pa.array(res_e_list, type=pa.string()),
+                        "_is_unmap": pa.array(unmap_list, type=pa.bool_()),
+                    }
+                ),
+            )
+
+            # Build distinct unit mapping table if unit_column exists
+            has_unit_col = bool(manifest.unit_column and manifest.unit_column in avail_cols)
+            if has_unit_col and manifest.unit_column is not None:
+                u_ident = _quote_ident(manifest.unit_column)
+                distinct_u = [
+                    str(r[0])
+                    for r in con.sql(
+                        f"SELECT DISTINCT {u_ident}::VARCHAR FROM raw_numbered "
+                        f"WHERE {u_ident} IS NOT NULL"
+                    ).fetchall()
+                ]
+                u_raw: list[str] = []
+                u_mapped: list[str | None] = []
+                u_pct: list[bool] = []
+                for u_str in distinct_u:
+                    stripped = u_str.strip()
+                    lowered = stripped.lower()
+                    u_raw.append(u_str)
+                    u_mapped.append(normalize_unit(u_str))
+                    u_pct.append(bool(stripped and lowered in PERCENT_UNITS))
+                con.register(
+                    "unit_map_tbl",
+                    pa.table(
+                        {
+                            "_raw_u": pa.array(u_raw, type=pa.string()),
+                            "_mapped_u": pa.array(u_mapped, type=pa.string()),
+                            "_is_pct": pa.array(u_pct, type=pa.bool_()),
+                        }
+                    ),
+                )
+                unit_join = f"LEFT JOIN unit_map_tbl um ON r.{u_ident}::VARCHAR = um._raw_u"
+                mapped_u_expr = "um._mapped_u"
+                is_pct_expr = "COALESCE(um._is_pct, FALSE)"
+            else:
+                unit_join = ""
+                mapped_u_expr = "NULL::VARCHAR"
+                is_pct_expr = "FALSE"
+
+            union_branches: list[str] = []
+            for val_ord, val_col in enumerate(manifest.value_columns):
+                if manifest.field_columns:
+                    f_parts = [
+                        f"COALESCE(r.{_quote_ident(fc)}::VARCHAR, '')" if fc in avail_cols else "''"
+                        for fc in manifest.field_columns
+                    ]
+                    if len(manifest.value_columns) > 1:
+                        vc_esc = val_col.replace("'", "''")
+                        f_parts.append(f"'{vc_esc}'")
+                    field_expr = " || '|' || ".join(f_parts)
+                else:
+                    vc_esc = val_col.replace("'", "''")
+                    field_expr = f"'{vc_esc}'"
+
+                if val_col in avail_cols:
+                    vc_ident = f"r.{_quote_ident(val_col)}"
+                    raw_str_expr = f"{vc_ident}::VARCHAR"
+                else:
+                    raw_str_expr = "NULL::VARCHAR"
+
+                union_branches.append(
+                    f"""
+                    SELECT
+                        em._res_ent AS entity_id,
+                        '{id_type_esc}' AS entity_id_type,
+                        {field_expr} AS field,
+                        {ev_ts_expr} AS event_time,
+                        {kt_ts_expr} AS knowledge_time,
+                        {raw_str_expr} AS _raw_v,
+                        {mapped_u_expr} AS _mapped_u,
+                        {is_pct_expr} AS _is_pct,
+                        r._vdok_src_row AS _src_row,
+                        {val_ord} AS _val_ord,
+                        em._is_unmap AS unmapped
+                    FROM raw_numbered r
+                    JOIN ent_map_tbl em ON r._vdok_raw_ent = em._raw_ent
+                    {unit_join}
+                    WHERE r.{ev_ident} IS NOT NULL
+                      AND {ev_ts_expr} IS NOT NULL
+                      AND {kt_null_filter}
+                    """
+                )
+
+            if not union_branches:
+                continue
+
+            unioned_sql = " UNION ALL ".join(union_branches)
+            final_sql = f"""
+            WITH unpivoted AS (
+                {unioned_sql}
+            ),
+            cleaned AS (
+                SELECT
+                    *,
+                    CASE
+                        WHEN _raw_v IS NULL THEN NULL
+                        WHEN contains(trim(_raw_v), ',') AND contains(trim(_raw_v), '.')
+                        THEN replace(trim(_raw_v), ',', '')
+                        ELSE trim(_raw_v)
+                    END AS _clean_v
+                FROM unpivoted
+            ),
+            typed AS (
+                SELECT
+                    entity_id,
+                    entity_id_type,
+                    field,
+                    event_time,
+                    knowledge_time,
+                    CASE
+                        WHEN _clean_v IS NULL OR _clean_v = '' THEN NULL::DECIMAL(38, 9)
+                        WHEN TRY_CAST(_clean_v AS DECIMAL(38, 12)) IS NOT NULL THEN
+                            ROUND(
+                                CASE
+                                    WHEN _is_pct
+                                    THEN TRY_CAST(_clean_v AS DECIMAL(38, 12)) / 100
+                                    ELSE TRY_CAST(_clean_v AS DECIMAL(38, 12))
+                                END,
+                                9
+                            )::DECIMAL(38, 9)
+                        ELSE NULL::DECIMAL(38, 9)
+                    END AS value_num,
+                    CASE
+                        WHEN _clean_v IS NOT NULL AND _clean_v != ''
+                             AND TRY_CAST(_clean_v AS DECIMAL(38, 12)) IS NULL
+                        THEN _raw_v
+                        ELSE NULL::VARCHAR
+                    END AS value_str,
+                    _mapped_u AS unit,
+                    '{drop_id_esc}' AS drop_id,
+                    '{rel_esc}' AS source_file,
+                    _src_row::BIGINT AS source_row,
+                    _val_ord,
+                    unmapped
+                FROM cleaned
+            )
+            SELECT
+                entity_id,
+                entity_id_type,
+                field,
+                event_time,
+                knowledge_time,
+                value_num,
+                value_str,
+                unit,
+                drop_id,
+                source_file,
+                source_row,
+                sha256(
+                    (
+                        entity_id || chr(0) ||
+                        field || chr(0) ||
+                        strftime(
+                            event_time AT TIME ZONE 'UTC', '%Y-%m-%dT%H:%M:%S.%fZ'
+                        ) || chr(0) ||
+                        COALESCE(CAST(value_num AS VARCHAR), '') || chr(0) ||
+                        COALESCE(value_str, '') || chr(0) ||
+                        COALESCE(unit, '')
+                    )::BLOB
+                ) AS row_hash,
+                unmapped
+            FROM typed
+            ORDER BY source_row, _val_ord
+            """
+            file_tbl = con.sql(final_sql).to_arrow_table()
+            if len(file_tbl) > 0:
+                tables.append(file_tbl.cast(CANONICAL_ARROW_SCHEMA))
+        finally:
+            con.close()
+
+    if not tables:
+        return CANONICAL_ARROW_SCHEMA.empty_table()
+    if len(tables) == 1:
+        return tables[0]
+    return pa.concat_tables(tables)
+
+
 # 5. Drop Normalization Function
 def normalize_drop(
     drop_dir: Path | str,
@@ -328,8 +654,18 @@ def normalize_drop(
     drop_path = Path(drop_dir)
     drop_meta = scan(drop_path)
 
-    records: list[dict[str, Any]] = []
     default_drop_kt = as_of if as_of is not None else datetime.datetime.now(timezone.utc)
+    vec_tbl = _normalize_drop_vectorized(
+        drop_meta=drop_meta,
+        manifest=manifest,
+        drop_id=drop_id,
+        symbol_master=symbol_master,
+        default_drop_kt=default_drop_kt,
+    )
+    if vec_tbl is not None:
+        return vec_tbl
+
+    records: list[dict[str, Any]] = []
 
     for disc_file in drop_meta.files:
         f_path = disc_file.path

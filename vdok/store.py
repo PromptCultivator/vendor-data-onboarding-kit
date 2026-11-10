@@ -429,10 +429,15 @@ class BitemporalStore:
             manifest_buckets=manifest_buckets,
         )
         if len(table) > 0:
-            ev_min = table["event_time"].to_pylist()[0] if len(table) > 0 else None
-            ev_max = table["event_time"].to_pylist()[-1] if len(table) > 0 else None
-            kt_min = table["knowledge_time"].to_pylist()[0] if len(table) > 0 else None
-            kt_max = table["knowledge_time"].to_pylist()[-1] if len(table) > 0 else None
+            import pyarrow.compute as pc
+
+            min_max_fn = getattr(pc, "min_max")
+            ev_mm = min_max_fn(table["event_time"]).as_py()
+            kt_mm = min_max_fn(table["knowledge_time"]).as_py()
+            ev_min = ev_mm["min"]
+            ev_max = ev_mm["max"]
+            kt_min = kt_mm["min"]
+            kt_max = kt_mm["max"]
             drop_rec = {
                 "drop_id": drop_id,
                 "vendor": self.vendor,

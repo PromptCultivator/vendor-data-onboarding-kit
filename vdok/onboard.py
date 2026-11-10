@@ -112,11 +112,19 @@ def onboard_drop(
         else:
             symbol_master = SymbolMaster.load(p_sym)
     else:
-        # Check standard symbol master locations
-        candidates = [
-            Path("data/symbols/master.parquet"),
-            Path("tests/fixtures/symbols/company_tickers.json"),
-        ]
+        # Check standard symbol master locations (prefer fixture master for fixture drops)
+        if "fixtures" in Path(drop_path).parts:
+            candidates = [
+                Path("tests/fixtures/symbols/company_tickers.json"),
+                Path("data/symbols/master.parquet"),
+                Path("data/symbols/company_tickers.json"),
+            ]
+        else:
+            candidates = [
+                Path("data/symbols/master.parquet"),
+                Path("data/symbols/company_tickers.json"),
+                Path("tests/fixtures/symbols/company_tickers.json"),
+            ]
         for c in candidates:
             if c.exists():
                 try:

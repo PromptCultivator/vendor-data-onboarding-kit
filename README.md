@@ -4,32 +4,34 @@ A toolkit that onboards raw vendor datasets into an append-only bitemporal store
 
 ## Status
 
-`Status: design complete`
+`Status: benchmarked on Intel(R) Xeon(R) Platinum 8481C (2 cores, 7.8 GiB RAM)`
 
 ## Benchmark Results
 
-| Metric | Synthetic (50 MB) | Synthetic (1 GB) | Synthetic (10 GB) | SEC FSDS (4 Quarters) |
-|---|---|---|---|---|
-| Time from raw drop to report | TBD | TBD | TBD | TBD |
-| Validation throughput | TBD | TBD | TBD | TBD |
-| Store write throughput | TBD | TBD | TBD | TBD |
-| Peak resident memory | TBD | TBD | TBD | TBD |
-| Revision detection recall and precision | TBD | TBD | TBD | N/A (unlabeled) |
-| Point-in-time violations | TBD | TBD | TBD | TBD |
-| Leak detector recall | TBD | TBD | TBD | TBD |
-| Storage factor | TBD | TBD | TBD | TBD |
+Values report median and min–max range across isolated subprocess runs.
+
+| Metric | Synthetic (50 MB) | Synthetic (1 GB) | Synthetic (10 GB) | Synthetic (50 GB) | SEC FSDS (2023q3–2023q4) |
+|---|---|---|---|---|---|
+| Time from raw drop to report | 8.27 s (7.96–8.45 s) | 56.69 s (55.54–56.81 s) | TBD | TBD | 68.81 s (68.13–88.27 s) |
+| Validation throughput | 0.029 GB/s/core (0.028–0.030; 675,641 rows/s, cores=2) | 0.037 GB/s/core (0.036–0.039; 849,928 rows/s, cores=2) | TBD | TBD | 0.053 GB/s/core (0.048–0.053; 634,408 rows/s, cores=2) |
+| Store write throughput | 937,370 rows/s (67.4 MB/s, 64.3–68.9) | 1,644,264 rows/s (123.6 MB/s, 77.3–133.5) | TBD | TBD | 421,645 rows/s (41.4 MB/s, 32.6–42.1) |
+| Peak resident memory | 630.1 MiB (606.0–653.8 MiB) | 4967.0 MiB (4892.8–5053.1 MiB) | TBD | TBD | 4080.0 MiB (4070.8–4142.9 MiB) |
+| Revision detection recall and precision | recall 100.0%, precision 100.0% (25 revisions) | recall 100.0%, precision 100.0% (25 revisions) | TBD | TBD | 15,518 revisions detected (unlabeled) |
+| Point-in-time violations | 0 / 100,000 | 0 / 100,000 | TBD | TBD | 0 / 100,000 |
+| Leak detector recall | 100.0% (1,000/1,000, 0 false positives) | 100.0% (1,000/1,000, 0 false positives) | TBD | TBD | 100.0% (1,000/1,000, 0 false positives) |
+| Storage factor | 0.585× (0.585–0.586×) | 0.580× | TBD | TBD | 0.581× (0.580–0.581×) |
 
 ```
 Hardware & Environment:
   CPU Model: Intel(R) Xeon(R) Platinum 8481C
   CPU Cores: 2
   Memory: 7.8 GiB
-  Disk Type: NVMe / SSD (Virtual block store)
+  Disk Type: Virtual block store (virtio_blk)
   Operating System: Linux-6.12.105+-x86_64-with-glibc2.36
-  Python Version: 3.11.2
+  Python Version: 3.12.16
   DuckDB Version: 2.0.0
   PyArrow Version: 26.0.1
-  Git Commit: b8ac12502810e5b17630eb0794a1d851fad73862
+  Git Commit: 84a7f040b8912605b127413e1a0ae6b60615df79
 ```
 
 ## Quick Start
@@ -181,7 +183,7 @@ The kit provides three explicit behavioral guarantees, each checked by dedicated
 
 | ADR | Title | Optimizes | Costs |
 |---|---|---|---|
-| ADR 001 | Bitemporal Append-Only Store | Point-in-time reproducibility | Storage growth and bitemporal query path |
+| ADR 001 | Bitemporal Append-Only Store | Point-in-time reproducibility | Storage growth (measured 0.58× Parquet vs raw drop text) and bitemporal query path |
 | ADR 002 | Severity Tiers: Warn, Quarantine, Hold | Availability of valid rows | Secondary write path and quarantine reconciliation |
 | ADR 003 | Schema Inference, Pinning, and Drift Detection | Early detection of silent vendor structural drift | Manual approval step on schema migrations |
 | ADR 004 | Local-First DuckDB and Parquet Store | Single-command local reproducibility | Absence of distributed clustering and cloud object store semantics |
@@ -212,7 +214,7 @@ A revision ledger, vendor readiness report, and point-in-time leak detector comb
 - **Symbol Master**: SEC company tickers registry (`company_tickers.json`), public domain.
 - **Committed Fixtures**: A deterministic subset of approximately 20,000 `num` records and matching `sub` rows from SEC filings, plus a 200-entity ticker master fixture.
 - **Downloaded Data**: Raw quarterly archives downloaded via `make data` with declared User-Agent contact information and rate limiting.
-- **Optional Sources**: Federal Reserve Economic Data (FRED/ALFRED) vintage series; requires API registration. FRED data is not committed to the repository.
+- **Optional Sources**: Federal Reserve Economic Data (FRED/ALFRED) vintage series; requires API registration (`FRED_API_KEY`). FRED data is not committed to the repository, and the FRED terms of use must be read before any redistribution.
 
 ## AI Assistance
 

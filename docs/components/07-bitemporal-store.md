@@ -14,8 +14,7 @@ Storage partitions records across three logical dimensions: vendor, field groupi
 
 ```
 data/store/<vendor>/
-├── _duckdb/
-│   └── catalog.duckdb                      # DuckDB catalog database
+├── store.duckdb                            # DuckDB catalog database
 ├── <field_bucket>/
 │   └── <event_year>/
 │       ├── part-<drop_id_001>.parquet
@@ -60,7 +59,7 @@ The storage engine implements two safeguards against accidental data modificatio
 
 ## 4. DuckDB Catalog Integration
 
-To deliver interactive query performance over deep Parquet file trees, an embedded DuckDB database file (`catalog.duckdb`) maintains unified relational views:
+To deliver interactive query performance over deep Parquet file trees, an embedded DuckDB database file (`store.duckdb`) maintains unified relational views:
 
 ```sql
 CREATE OR REPLACE VIEW vendor_store AS

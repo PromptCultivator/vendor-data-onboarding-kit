@@ -55,6 +55,27 @@ def _get_pkg_version(module_name: str) -> str:
         return "not installed"
 
 
+def _get_disk_type() -> str:
+    """Detect backing block device type from /sys/block when running on Linux."""
+    sys_block = Path("/sys/block")
+    if sys_block.exists():
+        devs = sorted(p.name for p in sys_block.iterdir())
+        if any(d.startswith("nvme") for d in devs):
+            return "NVMe SSD"
+        if any(d.startswith("vd") for d in devs):
+            return "Virtual block store (virtio_blk)"
+        for d in devs:
+            if d.startswith(("sd", "xvd", "hd")):
+                rot = sys_block / d / "queue" / "rotational"
+                if rot.exists():
+                    val = rot.read_text(encoding="utf-8", errors="ignore").strip()
+                    if val == "0":
+                        return "SSD (non-rotational block device)"
+                    if val == "1":
+                        return "HDD (rotational block device)"
+    return "Local block storage"
+
+
 def get_hardware_info() -> dict[str, str]:
     """Emit hardware and environment specification dictionary."""
     cpu_cores = os.cpu_count() or 1
@@ -62,7 +83,7 @@ def get_hardware_info() -> dict[str, str]:
         "CPU Model": _get_cpu_model(),
         "CPU Cores": str(cpu_cores),
         "Memory": _get_ram_gb(),
-        "Disk Type": "NVMe / SSD (Virtual block store)",
+        "Disk Type": _get_disk_type(),
         "Operating System": platform.platform(),
         "Python Version": sys.version.split()[0],
         "DuckDB Version": _get_pkg_version("duckdb"),

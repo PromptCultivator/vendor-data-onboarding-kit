@@ -36,7 +36,7 @@ Adopt **Option 3 (Multi-Tier Severity Routing)**.
 
 ## Consequences
 
-- **Optimizes**: Availability of valid data rows while isolating anomalies and preventing feed-level data corruption from entering production stores.
+- **Optimizes**: Availability of valid data rows while isolating anomalies and preventing feed-level data corruption from entering production stores. On real SEC FSDS `2023q3` (`3,418,882` evaluated records), severity routing admitted `3,307,747` conforming rows (`96.75%`) while isolating `111,135` anomalous rows (`3.25%` — non-standard units, intra-drop duplicate keys, and date typos such as `2823-06-30`) without blocking ingestion.
 - **Costs**:
   - Secondary write path: Requires maintaining a dedicated quarantine storage hierarchy (`store/<vendor>/quarantine/part-<drop_id>.parquet`).
   - Operational reconciliation: Quarantined records require inspection workflows or vendor clarification to reprocess.

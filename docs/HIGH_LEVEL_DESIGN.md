@@ -126,18 +126,18 @@ vdok/
 
 ### Component Documentation Directory
 Detailed engineering documentation for each subsystem is provided in `docs/components/`:
-- [01 - Vendor Manifest Model](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/01-manifest.md)
-- [02 - Drop Discovery & Fingerprint](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/02-discovery.md)
-- [03 - Schema Engine & Drift Guard](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/03-schema-engine.md)
-- [04 - Canonical Normalization](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/04-normalization.md)
-- [05 - Symbology Master](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/05-symbology.md)
-- [06 - Validation & Severity Routing](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/06-validation.md)
-- [07 - Append-Only Bitemporal Store](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/07-bitemporal-store.md)
-- [08 - Revision Ledger & Diffing](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/08-revision-ledger.md)
-- [09 - PIT Query & Leak Detector](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/09-query-engine-leak-detector.md)
-- [10 - Readiness Reporting & Vendor Inquiries](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/10-readiness-report.md)
-- [11 - Ingestion Adapters](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/11-adapters.md)
-- [12 - CLI Workflows & Tooling](file:///home/antigravity/PromptCultivator/vendor-data-onboarding-kit/docs/components/12-cli.md)
+- [01 - Vendor Manifest Model](components/01-manifest.md)
+- [02 - Drop Discovery & Fingerprint](components/02-discovery.md)
+- [03 - Schema Engine & Drift Guard](components/03-schema-engine.md)
+- [04 - Canonical Normalization](components/04-normalization.md)
+- [05 - Symbology Master](components/05-symbology.md)
+- [06 - Validation & Severity Routing](components/06-validation.md)
+- [07 - Append-Only Bitemporal Store](components/07-bitemporal-store.md)
+- [08 - Revision Ledger & Diffing](components/08-revision-ledger.md)
+- [09 - PIT Query & Leak Detector](components/09-query-engine-leak-detector.md)
+- [10 - Readiness Reporting & Vendor Inquiries](components/10-readiness-report.md)
+- [11 - Ingestion Adapters](components/11-adapters.md)
+- [12 - CLI Workflows & Tooling](components/12-cli.md)
 
 ---
 
@@ -163,8 +163,7 @@ The storage hierarchy organizes data files by vendor, field grouping, and event 
 
 ```
 data/store/<vendor>/
-├── _duckdb/
-│   └── catalog.duckdb           # Relational catalog views and drop tracking
+├── store.duckdb                 # Relational catalog views and drop tracking
 ├── <field_bucket>/
 │   └── <event_year>/
 │       ├── part-<drop_id_1>.parquet

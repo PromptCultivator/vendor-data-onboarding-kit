@@ -23,20 +23,20 @@ Resolving diverse input symbols to a canonical enterprise identifier is required
    - *Cons*: High operational fragility; an unmapped minor firm in a 5,000-stock universe blocks data ingestion for the entire market.
 
 3. **Deterministic Rule-Based Resolution with Unmapped Flagging**:
-   - Resolve identifiers using exact rule-based matching against a versioned symbol master (e.g., SEC `company_tickers.json`) with documented exchange suffix stripping.
-   - For unresolved entities, retain the raw identifier, assign a deterministic synthetic key, flag `unmapped = true`, and report the occurrences in the readiness scorecard. Never guess.
+   - Resolve identifiers using exact rule-based matching against a content-hash-versioned symbol master (such as SEC `company_tickers.json`) with documented exchange suffix stripping and dual-class share normalization.
+   - For unresolved entities, retain the normalized raw identifier, flag `unmapped = true`, and report the occurrences in the readiness scorecard. Never guess.
 
 ## Decision
 Adopt **Option 3 (Deterministic Rule-Based Resolution with Unmapped Flagging)**.
 
 - All identifier mapping rules are deterministic and auditable.
-- Ticker suffixes (such as `.O`, `.N`, `.P`) are stripped according to a documented lookup table.
-- If an entity cannot be matched, it is marked `unmapped = true` and continues through ingestion with its raw identifier preserved.
-- The readiness report tallies unmapped entity counts and lists the most frequent unmapped identifiers, giving data operations teams a clear queue for investigation.
+- Ticker suffixes (such as `.OQ`, `.N`, `.P`) are stripped according to a documented lookup table, and dual-class separators (`.` or `/`) normalize to `-`.
+- If an entity cannot be matched against the versioned master, it is marked `unmapped = true` and continues through ingestion with its raw identifier preserved.
+- The readiness report tallies unmapped entity counts and lists the most frequent unmapped identifiers, giving data operations teams an explicit queue for investigation.
 
 ## Consequences
 
 - **Optimizes**: Auditability, deterministic reproducibility, and elimination of false-positive entity joins in quantitative models.
 - **Costs**:
-  - Manual review queue: Unresolved identifiers require human verification or vendor clarification to add to the master.
+  - Manual review queue: Unresolved identifiers require human verification or vendor clarification to add to the master. On real SEC FSDS `2023q3`, `71.90%` of records (`2,458,042`) resolved against the active SEC exchange ticker list while `28.10%` (`960,840` records from non-exchange-traded filers, funds, and delisted entities) entered the reported unmapped queue.
   - Coverage gap reporting: Datasets with unfamiliar vendor codes exhibit lower initial mapping rates until mapping rules are updated.

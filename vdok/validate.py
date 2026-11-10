@@ -527,7 +527,10 @@ class ValidationEngine:
                 batch_details["duplicate_threshold"] = dup_threshold
                 batch_details["duplicate_count"] = dup_count
 
-            # Evaluate other batch rules
+            batch_warn_rules: dict[str, int] = {}
+            pending_coverage_rules: list[RuleDefinition] = []
+
+            # Evaluate batch rules (deferring COVERAGE_GAP until row quarantine predicates run)
             for rule in self.rules:
                 if rule.scope != RuleScope.BATCH:
                     continue
@@ -604,48 +607,7 @@ class ValidationEngine:
                             failing_batch_rule_name = rule.name
 
                 elif rule.check == RuleCheckType.COVERAGE_GAP:
-                    man = context.manifest
-                    if man and man.expected_calendar != ExpectedCalendar.NONE and total_rows > 0:
-                        cadence = man.expected_calendar.value
-                        trunc_map = {
-                            "quarterly": "quarter",
-                            "monthly": "month",
-                            "weekly": "week",
-                            "daily": "day",
-                        }
-                        trunc_unit = trunc_map.get(cadence)
-                        if trunc_unit:
-                            rows = con.sql(
-                                f"""
-                                SELECT DISTINCT
-                                    strftime(
-                                        date_trunc('{trunc_unit}', event_time), '%Y-%m-%d'
-                                    ) AS p
-                                FROM canonical_table
-                                ORDER BY p
-                                """
-                            ).fetchall()
-                            periods = [
-                                datetime.date.fromisoformat(r[0]) for r in rows if r[0] is not None
-                            ]
-                            for i in range(len(periods) - 1):
-                                gap = _calculate_missing_periods(
-                                    periods[i], periods[i + 1], cadence
-                                )
-                                if gap > rule.max_missing_periods:
-                                    reason_str = (
-                                        f"Rule '{rule.name}': Coverage gap: {gap} "
-                                        f"consecutive {cadence} reporting periods missing "
-                                        f"between {periods[i]} and {periods[i + 1]}"
-                                    )
-                                    hold_reasons.append(reason_str)
-                                    if not failing_batch_rule_name:
-                                        failing_batch_rule_name = rule.name
-                                    batch_details["missing_periods"] = gap
-                                    batch_details["cadence"] = cadence
-                                    break
-
-            held = len(hold_reasons) > 0
+                    pending_coverage_rules.append(rule)
 
             # 4. Compile Row-Level Expressions into Single Vectorized Query
             quarantine_clauses: list[str] = [
@@ -689,6 +651,55 @@ class ValidationEngine:
                 FROM numbered;
                 """
             )
+
+            # Evaluate deferred COVERAGE_GAP rules over non-quarantined valid observations
+            for rule in pending_coverage_rules:
+                man = context.manifest
+                if man and man.expected_calendar != ExpectedCalendar.NONE and total_rows > 0:
+                    cadence = man.expected_calendar.value
+                    trunc_map = {
+                        "quarterly": "quarter",
+                        "monthly": "month",
+                        "weekly": "week",
+                        "daily": "day",
+                    }
+                    trunc_unit = trunc_map.get(cadence)
+                    if trunc_unit:
+                        rows = con.sql(
+                            f"""
+                            SELECT DISTINCT
+                                strftime(
+                                    date_trunc('{trunc_unit}', event_time), '%Y-%m-%d'
+                                ) AS p
+                            FROM evaluated
+                            WHERE len(quarantine_reasons) = 0
+                            ORDER BY p
+                            """
+                        ).fetchall()
+                        periods = [
+                            datetime.date.fromisoformat(r[0]) for r in rows if r[0] is not None
+                        ]
+                        for i in range(len(periods) - 1):
+                            gap = _calculate_missing_periods(periods[i], periods[i + 1], cadence)
+                            if gap > rule.max_missing_periods:
+                                reason_str = (
+                                    f"Rule '{rule.name}': Coverage gap: {gap} "
+                                    f"consecutive {cadence} reporting periods missing "
+                                    f"between {periods[i]} and {periods[i + 1]}"
+                                )
+                                if rule.severity == RuleSeverity.WARN:
+                                    batch_warn_rules[rule.name] = (
+                                        batch_warn_rules.get(rule.name, 0) + 1
+                                    )
+                                else:
+                                    hold_reasons.append(reason_str)
+                                    if not failing_batch_rule_name:
+                                        failing_batch_rule_name = rule.name
+                                    batch_details["missing_periods"] = gap
+                                    batch_details["cadence"] = cadence
+                                break
+
+            held = len(hold_reasons) > 0
 
             # 5. Extract Valid Table and Quarantine Table
             quarantine_rel = con.sql(
@@ -745,6 +756,10 @@ class ValidationEngine:
                 warn_count = int(warn_rows[0][0]) if warn_rows else 0
             else:
                 warn_count = 0
+
+            for bw_name, bw_cnt in batch_warn_rules.items():
+                rule_counts[bw_name] = rule_counts.get(bw_name, 0) + bw_cnt
+                warn_count += bw_cnt
 
             # Add failing batch rules to rule counts
             for hr in hold_reasons:

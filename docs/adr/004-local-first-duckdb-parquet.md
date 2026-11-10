@@ -28,7 +28,7 @@ However, external service dependencies make local testing, rapid iteration, and 
 Adopt **Option 3 (Local-First Columnar Parquet Tree with Embedded DuckDB)**.
 
 - Ingested records are written to local partitioned Parquet files (`store/<vendor>/<field_bucket>/<event_year>/part-<drop_id>.parquet`).
-- An embedded DuckDB database (`catalog.duckdb`) provides zero-copy analytical queries, unified views, and catalog tracking without requiring external server processes.
+- An embedded DuckDB database (`store.duckdb`) provides zero-copy analytical queries, unified views, and catalog tracking without requiring external server processes.
 - Single-command execution: runs on any developer laptop via `make onboard` without network dependencies.
 
 ## Consequences

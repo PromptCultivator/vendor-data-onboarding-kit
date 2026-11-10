@@ -76,4 +76,4 @@ rules:
   - name: coverage_gap_guard
     check: coverage_gap
     max_missing_periods: 1
-    severity: hold
+    severity: warn

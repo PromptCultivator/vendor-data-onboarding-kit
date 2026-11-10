@@ -91,11 +91,11 @@ columns:
     min: San Jose
     max: San Jose
   zipba:
-    type: integer
+    type: string
     nullable: false
     distinct_count: 1
-    min: 95134
-    max: 95134
+    min: '95134'
+    max: '95134'
   bas1:
     type: string
     nullable: false
@@ -131,11 +131,11 @@ columns:
     min: San Jose
     max: San Jose
   zipma:
-    type: integer
+    type: string
     nullable: false
     distinct_count: 1
-    min: 95134
-    max: 95134
+    min: '95134'
+    max: '95134'
   mas1:
     type: string
     nullable: true

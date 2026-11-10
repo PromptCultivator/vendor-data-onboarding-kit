@@ -25,6 +25,10 @@ This document records explicit choices made when specifications offer implementa
 | D-017 | Multi-Reason Quarantine Aggregation via Vectorized DuckDB List Lambda | 2026-11-10 | Accepted |
 | D-018 | Window Ranking Materialization for Primary Key Duplicate Ratio and Escalation | 2026-11-10 | Accepted |
 | D-019 | Exact Decimal Scale Validation in DuckDB Without Floating Point Conversion | 2026-11-10 | Accepted |
+| D-020 | Deterministic 4-Tier Field Bucketing Without Inode Explosion | 2026-11-10 | Accepted |
+| D-021 | Read-Only POSIX 0o444 Partition Locking and Append-Only Collision Refusal | 2026-11-10 | Accepted |
+| D-022 | Windowed Revision Detection via Relational Distinct Comparisons | 2026-11-10 | Accepted |
+| D-023 | Timezone-Aware Zero-Pytz Query Path via PyArrow Table Materialization | 2026-11-10 | Accepted |
 
 
 ---
@@ -285,3 +289,61 @@ This document records explicit choices made when specifications offer implementa
 - **Justification:** DuckDB executes `ROUND` directly on fixed-point `DECIMAL` types without intermediate floating point conversion. If a number contains fractional components beyond `scale` digits, `ROUND(col, scale)` differs from `col`, flagging the record. This maintains 100% adherence to the zero-float mandate of Section 13 while delivering high execution performance in SQL.
 - **Consequences:** Columns evaluated by `decimal_scale` must be numeric or Decimal representations in Arrow. Inputs outside the configured scale are quarantined with rule violation tags.
 - **Test Guarantee Impact:** Verified by `tests/unit/test_validate.py::test_rule_decimal_scale_without_float` and `tests/unit/test_empirical_challenger2.py::test_decimal_scale_boundaries_and_precision`, confirming boundary scale values without float conversion.
+
+---
+
+### D-020: Deterministic 4-Tier Field Bucketing Without Inode Explosion
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.7 requires partitioning data as `store/<vendor>/<field_bucket>/<event_year>/part-<drop_id>.parquet`. If raw tags or fields each formed a directory, datasets with thousands of accounting line items (like SEC FSDS) would cause filesystem inode exhaustion and partition explosion. Conversely, placing all fields into a single catch-all folder eliminates thematic file pruning during queries.
+- **Options Considered:**
+  1. Creating a directory for every unique field name or tag.
+  2. Single flat directory structure without field categorization.
+  3. Deterministic 4-tier taxonomy mapping fields into high-level thematic groups (`income_statement`, `balance_sheet`, `cash_flow`, `market_prices`, `macro`, and a `'general'` fallback).
+- **Decision:** Implement Option 3. Check manifest overrides first, followed by financial statement keyword taxonomies (cash flow before balance sheet to avoid collision on "cash"), market quotes, macroeconomic indicators, and a general fallback.
+- **Justification:** Bounding directory fanout to fewer than 10 directories per vendor prevents inode exhaustion while providing directory pruning during point-in-time analytical queries.
+- **Consequences:** Directory layout remains deterministic and bounded. Queries on specific statements or market prices only inspect relevant directory trees.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_store.py::test_resolve_field_bucket` and `test_write_partitioned_store_multi_partition`.
+
+---
+
+### D-021: Read-Only POSIX 0o444 Partition Locking and Append-Only Collision Refusal
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.7, Guarantee 1 (G1), and Guarantee 3 (G3) require that the partition store is strictly append-only. Partition files must be immutable once written, and attempting to overwrite an existing drop must be refused.
+- **Options Considered:**
+  1. Standard file overwrite (`mode='w'`) with silent replacement.
+  2. Pre-write filesystem scanning for existing `part-<drop_id>.parquet` files, raising a dedicated `AppendOnlyViolationError(FileExistsError)` upon collision, and immediately setting written file modes to POSIX `0o444`.
+- **Decision:** Implement Option 2. Before any partition file is written, scan for existing matching partitions for `drop_id`. If detected, abort and raise `AppendOnlyViolationError`. Immediately after writing, lock file permissions with `os.chmod(path, 0o444)`.
+- **Justification:** Multiple layers of protection guarantee that historical records can never be mutated or replaced in place, preventing backtest look-ahead bias and preserving data integrity.
+- **Consequences:** Re-ingesting an identical drop requires explicit detection at the idempotency layer. Files cannot be modified in place.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_guarantees.py::test_g1_store_is_append_only` and `test_g3_rerun_same_drop_adds_no_rows`.
+
+---
+
+### D-022: Windowed Revision Detection via Relational Distinct Comparisons
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.8 requires that after each drop, a query finds keys that already exist with different values at earlier knowledge times and catalogs them into a revisions ledger. Comparing against all historical vintages would cause Cartesian growth across cascading restatements.
+- **Options Considered:**
+  1. Full Cartesian cross-join across all historical drops.
+  2. Windowed SQL ranking prior historical store records with `ROW_NUMBER() OVER (PARTITION BY entity_id, field, event_time ORDER BY knowledge_time DESC) = 1` and comparing incoming rows against this latest active baseline using `IS DISTINCT FROM`.
+- **Decision:** Implement Option 2. Query pairs incoming drop keys exclusively against the immediately prior latest state, using `IS DISTINCT FROM` across numeric, string, and unit fields.
+- **Justification:** Prevents redundant duplicate revision pairs when a single value undergoes successive revisions across drops 1, 2, and 3. `IS DISTINCT FROM` preserves exact decimal comparisons without float coercion.
+- **Consequences:** Memory and compute complexity scale linearly with incoming drop volume rather than quadratically with historical drop count.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_planted_restatements.py` achieving 100% recall and 100% precision on synthetic planted restatement sequences and at 50 MB scale.
+
+---
+
+### D-023: Timezone-Aware Zero-Pytz Query Path via PyArrow Table Materialization
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 10 restricts runtime dependencies, prohibiting `pytz`. When DuckDB executes DB-API `fetchall()` on tables containing `TIMESTAMPTZ` columns, DuckDB raises an internal error attempting to import `pytz`.
+- **Options Considered:**
+  1. Add `pytz` to dependencies (violates allowed dependency constraint Rule 4).
+  2. Strip timezone information from timestamps (violates UTC microsecond precision mandate).
+  3. Materialize DuckDB query results directly into PyArrow tables via `con.execute(...).to_arrow_table().to_pylist()`.
+- **Decision:** Implement Option 3 in `vdok/query.py` and format temporal strings with `strftime` in analytical reporting.
+- **Justification:** PyArrow uses Python 3.9+'s native standard library `zoneinfo.ZoneInfo(key='Etc/UTC')` for UTC timestamps, resolving timezone conversions without external packages.
+- **Consequences:** Eliminates third-party timezone dependencies while preserving microsecond precision across all query interfaces.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_query.py` and `tests/unit/test_revisions.py`.

@@ -97,9 +97,40 @@ def leaks(
         "--decision-time-column",
         help="Decision time column name",
     ),
+    json_output: bool = typer.Option(
+        False,
+        "--json-output",
+        help="Output report in JSON format",
+    ),
 ) -> None:
     """Detect point-in-time read leaks from query audit logs."""
+    from vdok.query import detect_leaks
+
     typer.echo(f"Leak detection: log={log}, col={decision_time_column}")
+
+    log_path = Path(log)
+    if not log_path.exists():
+        typer.echo(f"Audit log file not found: {log_path}")
+        return
+
+    report = detect_leaks(log_path, decision_time_column=decision_time_column)
+
+    if json_output:
+        typer.echo(report.model_dump_json(indent=2))
+    else:
+        typer.echo(
+            f"  Total queries: {report.total_reads}\n"
+            f"  Total leaks: {report.leaks_detected}\n"
+            f"  As-Of leaks: {report.as_of_leaks}\n"
+            f"  Knowledge leaks: {report.knowledge_leaks}"
+        )
+
+    if report.has_leaks:
+        typer.echo("FAILURE: Look-ahead bias detected in query audit log.")
+        raise typer.Exit(code=1)
+    else:
+        typer.echo("SUCCESS: Zero look-ahead leaks detected.")
+        raise typer.Exit(code=0)
 
 
 @schema_app.command("infer")

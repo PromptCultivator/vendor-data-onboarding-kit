@@ -87,6 +87,9 @@ class SyntheticGenerator:
             "type_flip_count": 10,
             "out_of_range": False,
             "out_of_range_count": 10,
+            "restatement": False,
+            "restatement_count": 25,
+            "restatement_delta": 0.10,
             "repeat_drop": False,
             "schema_drift": False,
         }
@@ -101,6 +104,9 @@ class SyntheticGenerator:
                 flags["type_flip_count"] = 10
                 flags["out_of_range"] = True
                 flags["out_of_range_count"] = 10
+                flags["restatement"] = True
+                flags["restatement_count"] = 25
+                flags["restatement_delta"] = 0.10
             elif drop_idx == 3:
                 flags["schema_drift"] = True
 
@@ -119,6 +125,10 @@ class SyntheticGenerator:
                 elif name == "out_of_range" and drop_idx == 2:
                     flags["out_of_range"] = True
                     flags["out_of_range_count"] = 10
+                elif name in ("restatement", "restate") and drop_idx == 2:
+                    flags["restatement"] = True
+                    flags["restatement_count"] = 25
+                    flags["restatement_delta"] = 0.10
                 elif name == "repeat_drop" and drop_idx == 2:
                     flags["repeat_drop"] = True
                 elif name == "schema_drift" and drop_idx == 3:
@@ -154,6 +164,17 @@ class SyntheticGenerator:
                 elif isinstance(val, int):
                     flags["out_of_range_count"] = val
 
+            if "restatement" in cfg and drop_idx == 2:
+                flags["restatement"] = True
+                val = cfg["restatement"]
+                if isinstance(val, dict):
+                    flags["restatement_count"] = int(val.get("count", 25))
+                    flags["restatement_delta"] = float(val.get("delta", 0.10))
+                elif isinstance(val, int):
+                    flags["restatement_count"] = val
+                elif isinstance(val, float):
+                    flags["restatement_delta"] = val
+
             if "repeat_drop" in cfg and drop_idx == 2:
                 flags["repeat_drop"] = bool(cfg["repeat_drop"])
 
@@ -182,6 +203,9 @@ class SyntheticGenerator:
             type_flip_cnt = 10
             has_out_of_range = False
             out_of_range_cnt = 10
+            has_restate = False
+            restate_cnt = 25
+            restate_delta = 0.10
 
             if f_cfg:
                 if isinstance(f_cfg, list):
@@ -197,6 +221,8 @@ class SyntheticGenerator:
                             has_type_flip = True
                         elif s == "out_of_range":
                             has_out_of_range = True
+                        elif s in ("restatement", "restate"):
+                            has_restate = True
                 elif isinstance(f_cfg, dict):
                     if "duplicate_row" in f_cfg:
                         has_dup = True
@@ -217,6 +243,16 @@ class SyntheticGenerator:
                         val = f_cfg["out_of_range"]
                         if isinstance(val, int):
                             out_of_range_cnt = val
+                    if "restatement" in f_cfg:
+                        has_restate = True
+                        val = f_cfg["restatement"]
+                        if isinstance(val, dict):
+                            restate_cnt = int(val.get("count", 25))
+                            restate_delta = float(val.get("delta", 0.10))
+                        elif isinstance(val, int):
+                            restate_cnt = val
+                        elif isinstance(val, float):
+                            restate_delta = val
 
             # Construct SQL expressions for planted faults
             price_cases: list[str] = []
@@ -237,6 +273,15 @@ class SyntheticGenerator:
                 cursor = end_oor
 
             seed_offset = (self.seed * 37) % 1000
+            if has_restate:
+                if cursor < 20:
+                    cursor = 20
+                end_restate = cursor + restate_cnt
+                base_num = f"(100.0 + ((i + {seed_offset}) % 500) + (i % 100) * 0.01)"
+                restate_price = f"ROUND({base_num} * (1.0 + {restate_delta}), 4)::DECIMAL(38, 9)"
+                price_cases.append(f"WHEN i >= {cursor} AND i < {end_restate} THEN {restate_price}")
+                cursor = end_restate
+
             default_price = (
                 f"ROUND(100.0 + ((i + {seed_offset}) % 500) + (i % 100) * 0.01, 4)::DECIMAL(38, 9)"
             )
@@ -249,6 +294,16 @@ class SyntheticGenerator:
                 val_str_expr = f"CASE {' '.join(val_str_cases)} ELSE NULL::VARCHAR END"
             else:
                 val_str_expr = "NULL::VARCHAR"
+
+            drop_offset = 0
+            if "drop_" in drop_id:
+                try:
+                    drop_offset = max(0, int(drop_id.split("drop_")[1].split("_")[0]) - 1)
+                except Exception:
+                    drop_offset = 0
+
+            kt_int = f"INTERVAL '{drop_offset} DAY' + INTERVAL (i // 10) SECOND"
+            kt_expr = f"('2024-01-01 02:00:00'::TIMESTAMPTZ + {kt_int})"
 
             base_query = f"""
             SELECT
@@ -267,7 +322,7 @@ class SyntheticGenerator:
                 'cik' AS entity_id_type,
                 'price' AS field,
                 ('2024-01-01 00:00:00'::TIMESTAMPTZ + INTERVAL (i // 10) SECOND) AS event_time,
-                ('2024-01-01 02:00:00'::TIMESTAMPTZ + INTERVAL (i // 10) SECOND) AS knowledge_time,
+                {kt_expr} AS knowledge_time,
                 {price_expr} AS value_num,
                 {val_str_expr} AS value_str,
                 'USD' AS unit,
@@ -311,6 +366,8 @@ class SyntheticGenerator:
                 "type_flip_count": type_flip_cnt if has_type_flip else 0,
                 "has_out_of_range": has_out_of_range,
                 "out_of_range_count": out_of_range_cnt if has_out_of_range else 0,
+                "has_restatement": has_restate,
+                "restatement_count": restate_cnt if has_restate else 0,
             }
             return casted, info
 
@@ -355,6 +412,9 @@ class SyntheticGenerator:
             tf_count = flags.get("type_flip_count", 10)
             has_oor = flags.get("out_of_range", False)
             oor_count = flags.get("out_of_range_count", 10)
+            has_restate = flags.get("restatement", False)
+            restate_count = flags.get("restatement_count", 25)
+            restate_delta = flags.get("restatement_delta", 0.10)
             has_drift = flags.get("schema_drift", False)
 
             # Planted faults in price column
@@ -371,6 +431,20 @@ class SyntheticGenerator:
                 cursor = end_oor
 
             seed_offset = (self.seed * 37) % 1000
+            start_restate = cursor
+            end_restate = cursor
+            if has_restate:
+                if cursor < 20:
+                    cursor = 20
+                start_restate = cursor
+                end_restate = cursor + restate_count
+                base_calc = f"(100.0 + ((i + {seed_offset}) % 500) + (i % 100) * 0.01)"
+                restate_price = f"printf('%.4f', {base_calc} * (1.0 + {restate_delta}))"
+                price_cases.append(
+                    f"WHEN i >= {start_restate} AND i < {end_restate} THEN {restate_price}"
+                )
+                cursor = end_restate
+
             default_price = (
                 f"printf('%.4f', 100.0 + ((i + {seed_offset}) % 500) + (i % 100) * 0.01)"
             )
@@ -505,6 +579,19 @@ class SyntheticGenerator:
                         "count": oor_count,
                         "min": 0.0,
                         "expected_severity": "quarantine",
+                    }
+                )
+
+            if has_restate:
+                planted_faults.append(
+                    {
+                        "type": "restatement",
+                        "column": "price",
+                        "field": "price",
+                        "count": restate_count,
+                        "delta": restate_delta,
+                        "expected_severity": "warn",
+                        "indices": list(range(start_restate, end_restate)),
                     }
                 )
 

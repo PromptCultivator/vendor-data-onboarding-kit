@@ -44,6 +44,13 @@ class RevisionStats(BaseModel):
     silent_overwrite_fields: list[str] = Field(default_factory=list)
     largest_changes: list[dict[str, Any]] = Field(default_factory=list)
 
+    @property
+    def rate_per_field(self) -> dict[str, float]:
+        return self.field_rates
+
+
+RevisionSummary = RevisionStats
+
 
 def detect_revisions(
     con: duckdb.DuckDBPyConnection,
@@ -383,3 +390,30 @@ def compute_revision_rates(
 
     finally:
         con.close()
+
+
+def compute_revisions(
+    store_or_base: Any,
+    vendor: str,
+    drop_id: str,
+    incoming_table: pa.Table | None = None,
+) -> tuple[RevisionStats, pa.Table]:
+    """Convenience helper to detect and compute revision rates."""
+    base_path = getattr(store_or_base, "base_dir", store_or_base)
+    con = duckdb.connect()
+    try:
+        rev_table = detect_revisions(
+            con=con,
+            vendor=vendor,
+            incoming_drop_id=drop_id,
+            base_path=base_path,
+            incoming_table=incoming_table,
+        )
+    finally:
+        con.close()
+
+    if len(rev_table) > 0:
+        record_revisions(base_path=base_path, vendor=vendor, revisions_table=rev_table)
+
+    stats = compute_revision_rates(base_path=base_path, vendor=vendor, drop_id=drop_id)
+    return stats, rev_table

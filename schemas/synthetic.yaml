@@ -1,0 +1,58 @@
+vendor: synthetic
+version: 1
+pinned_at: '2026-11-10T13:25:37.107659+00:00'
+columns:
+  record_id:
+    type: integer
+    nullable: false
+    distinct_count: 6316
+    min: 1000
+    max: 7315
+  entity_id:
+    type: string
+    nullable: false
+    distinct_count: 10
+    min: AAPL
+    max: V
+  price:
+    type: decimal
+    nullable: false
+    distinct_count: 500
+    min: '100.5100'
+    max: '599.5000'
+    precision: 18
+    scale: 4
+  weight:
+    type: float
+    nullable: false
+    distinct_count: 100
+    min: 0.01
+    max: 0.109
+  status:
+    type: string
+    nullable: false
+    distinct_count: 3
+    min: ACTIVE
+    max: PENDING
+  trade_date:
+    type: date
+    nullable: false
+    distinct_count: 1
+    min: '2024-01-01'
+    max: '2024-01-01'
+  event_time:
+    type: datetime
+    nullable: false
+    distinct_count: 632
+    min: '2024-01-01T00:00:00Z'
+    max: '2024-01-01T00:10:31Z'
+  is_primary:
+    type: boolean
+    nullable: false
+    distinct_count: 2
+  notes:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: Regular observation
+    max: Regular observation

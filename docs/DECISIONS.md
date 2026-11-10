@@ -347,3 +347,42 @@ This document records explicit choices made when specifications offer implementa
 - **Justification:** PyArrow uses Python 3.9+'s native standard library `zoneinfo.ZoneInfo(key='Etc/UTC')` for UTC timestamps, resolving timezone conversions without external packages.
 - **Consequences:** Eliminates third-party timezone dependencies while preserving microsecond precision across all query interfaces.
 - **Test Guarantee Impact:** Verified by `tests/unit/test_query.py` and `tests/unit/test_revisions.py`.
+
+---
+
+### D-024: Drop-Level Knowledge Time Evaluation for Batch Temporal Coherence
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.3 allows `knowledge_time` to be derived either from a dedicated metadata column or from `drop_time`. When evaluating `knowledge_time` inside per-row parsing loops, repeated calls to `datetime.now(timezone.utc)` caused different rows within the same transmission drop to have microsecond-divergent knowledge timestamps.
+- **Options Considered:**
+  1. Evaluate `datetime.now(timezone.utc)` inside the per-row parsing iteration.
+  2. Pin a single batch-level UTC knowledge timestamp at drop initialization (`default_drop_kt`), applying this identical timestamp across all rows in the drop batch.
+- **Decision:** Implement Option 2 in `vdok/normalize.py`.
+- **Justification:** Records delivered in a single transmission drop share an identical knowledge time unless row-level filing timestamps state otherwise. Evaluating once at the drop boundary ensures deterministic bitemporal coordinates across the entire drop payload.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_normalize.py` and `tests/golden/test_report_goldens.py`.
+
+---
+
+### D-025: Dual-Path Fallback for ISO-8601 and Delimited Timestamp Ingestion
+
+- **Date:** 2026-11-10
+- **Context:** Vendor manifests declare explicit timestamp formats (such as `%Y-%m-%d %H:%M:%S`), but transmission feeds frequently deliver ISO-8601 formatted timestamps with `T` separators and `Z` timezone designators. Strict format parsing raises ValueError when format specifiers deviate from payload variations.
+- **Options Considered:**
+  1. Enforce strict rejection of all timestamps that do not conform exactly to the declared format string.
+  2. Attempt manifest format parsing first; upon format failure, fall back to Python's standard `datetime.fromisoformat()`, followed by `dateutil.parser.parse()`, localizing naive timestamps to the declared manifest timezone and converting to UTC.
+- **Decision:** Implement Option 2 in `parse_timestamp_utc`.
+- **Justification:** Financial drops frequently mix strict date-time representations and ISO-8601 variations. Providing a resilient fallback prevents spurious ingestion aborts while maintaining strict conversion to UTC microsecond timestamps.
+- **Test Guarantee Impact:** Verified by `tests/unit/test_normalize.py::test_parse_timestamp_utc_dateutil_fallback` and `tests/unit/test_onboard.py`.
+
+---
+
+### D-026: Deterministic Multi-Tie Breaking and Relation Separation for Diff and Readiness Reports
+
+- **Date:** 2026-11-10
+- **Context:** SPEC § 5.9 and § 5.10 require deterministic readiness reporting and drop diffing. In DuckDB, executing aggregation queries without explicit tie-breakers resulted in indeterminate dictionary key ordering for zero-rate restatements. Additionally, invoking `.to_arrow_table()` on active DB-API execute cursors raised `UserWarning` or `ResourceInUseException`.
+- **Options Considered:**
+  1. Rely on DuckDB internal group iteration order and DB-API cursor state.
+  2. Enforce deterministic multi-key sorting `(-rate, field_name)` across all report tables, use DuckDB's relation-level `.sql().to_arrow_table()` API, and utilize `.fetchall()[0][0]` for scalar count queries.
+- **Decision:** Implement Option 2 in `vdok/report.py`.
+- **Justification:** Guarantees bit-for-bit identical markdown reports across runs regardless of query execution plans or filesystem iteration order. Eliminates connection cursor conflicts when running multiple analytical passes over Parquet views.
+- **Test Guarantee Impact:** Verified by `tests/golden/test_report_goldens.py` and `tests/unit/test_report.py`.

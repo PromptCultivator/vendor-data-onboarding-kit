@@ -150,7 +150,15 @@ def parse_timestamp_utc(
         raise ValueError("Timestamp string cannot be empty")
 
     if fmt:
-        parsed = datetime.datetime.strptime(s, fmt)
+        try:
+            parsed = datetime.datetime.strptime(s, fmt)
+        except ValueError:
+            try:
+                parsed = datetime.datetime.fromisoformat(s)
+            except ValueError:
+                from dateutil import parser as dt_parser
+
+                parsed = dt_parser.parse(s)
     else:
         try:
             parsed = datetime.datetime.fromisoformat(s)
@@ -297,6 +305,7 @@ def normalize_drop(
     manifest: VendorManifest,
     drop_id: str,
     symbol_master: SymbolMaster | None = None,
+    as_of: datetime.datetime | None = None,
 ) -> pa.Table:
     """Normalize an incoming drop batch into a canonical Apache Arrow Table.
 
@@ -304,10 +313,23 @@ def normalize_drop(
     extraction, exact decimal conversion, UTC temporal alignment, unit translation,
     and symbol master resolution.
     """
+    if manifest.vendor == "sec_fsds":
+        from vdok.adapters.sec_fsds import is_sec_fsds_drop, normalize_sec_fsds_drop
+
+        if is_sec_fsds_drop(drop_dir):
+            return normalize_sec_fsds_drop(
+                drop_dir=drop_dir,
+                manifest=manifest,
+                drop_id=drop_id,
+                symbol_master=symbol_master,
+                as_of=as_of,
+            )
+
     drop_path = Path(drop_dir)
     drop_meta = scan(drop_path)
 
     records: list[dict[str, Any]] = []
+    default_drop_kt = as_of if as_of is not None else datetime.datetime.now(timezone.utc)
 
     for disc_file in drop_meta.files:
         f_path = disc_file.path
@@ -386,7 +408,7 @@ def normalize_drop(
                     source_tz=manifest.timezone,
                 )
             else:
-                kt_dt = datetime.datetime.now(timezone.utc)
+                kt_dt = default_drop_kt
 
             # Extract unit of measure
             raw_unit_val: str | None = None

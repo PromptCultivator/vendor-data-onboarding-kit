@@ -45,7 +45,7 @@ bench-smoke:
 	python bench/run.py --smoke
 
 goldens:
-	@echo "Golden report update stub"
+	pytest tests/golden/test_report_goldens.py --update-goldens -v
 
 docker:
 	docker build -t vdok .

@@ -1,0 +1,254 @@
+vendor: sec_fsds
+version: 1
+pinned_at: '2026-11-10T13:27:05.163742+00:00'
+columns:
+  adsh:
+    type: string
+    nullable: false
+    distinct_count: 50
+    min: 0000001800-23-000030
+    max: 0001744489-23-000034
+  tag:
+    type: string
+    nullable: false
+    distinct_count: 5
+    min: Assets
+    max: Revenues
+  version:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: us-gaap/2023
+    max: us-gaap/2023
+  coreg:
+    type: string
+    nullable: true
+    distinct_count: 0
+  ddate:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 20230630
+    max: 20230630
+  qtrs:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 2
+    max: 2
+  uom:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: USD
+    max: USD
+  value:
+    type: decimal
+    nullable: false
+    distinct_count: 248
+    min: '219000000.0000'
+    max: '5985000000.0000'
+    precision: 18
+    scale: 4
+  footnote:
+    type: string
+    nullable: true
+    distinct_count: 0
+  cik:
+    type: integer
+    nullable: false
+    distinct_count: 50
+    min: 1800
+    max: 1744489
+  name:
+    type: string
+    nullable: false
+    distinct_count: 50
+    min: ABBOTT LABORATORIES
+    max: Walt Disney Co
+  sic:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 7372
+    max: 7372
+  countryba:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: US
+    max: US
+  stprba:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: CA
+    max: CA
+  cityba:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: San Jose
+    max: San Jose
+  zipba:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 95134
+    max: 95134
+  bas1:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: Market St
+    max: Market St
+  bas2:
+    type: string
+    nullable: true
+    distinct_count: 0
+  baph:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: 555-0100
+    max: 555-0100
+  countryma:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: US
+    max: US
+  stprma:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: CA
+    max: CA
+  cityma:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: San Jose
+    max: San Jose
+  zipma:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 95134
+    max: 95134
+  mas1:
+    type: string
+    nullable: true
+    distinct_count: 0
+  mas2:
+    type: string
+    nullable: true
+    distinct_count: 0
+  countryinc:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: US
+    max: US
+  stprinc:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: DE
+    max: DE
+  ein:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 123456789
+    max: 123456789
+  former:
+    type: string
+    nullable: true
+    distinct_count: 0
+  changed:
+    type: string
+    nullable: true
+    distinct_count: 0
+  afs:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: 1-LAF
+    max: 1-LAF
+  wksi:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 1
+    max: 1
+  fye:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 1231
+    max: 1231
+  form:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: 10-Q
+    max: 10-Q
+  period:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 20230630
+    max: 20230630
+  fy:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 2023
+    max: 2023
+  fp:
+    type: string
+    nullable: false
+    distinct_count: 1
+    min: Q2
+    max: Q2
+  filed:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 20230815
+    max: 20230815
+  accepted:
+    type: datetime
+    nullable: false
+    distinct_count: 1
+    min: '2023-08-15 16:30:00'
+    max: '2023-08-15 16:30:00'
+  prevrpt:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 0
+    max: 0
+  detail:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 1
+    max: 1
+  instance:
+    type: string
+    nullable: false
+    distinct_count: 50
+    min: filing_1.htm
+    max: filing_9.htm
+  nciks:
+    type: integer
+    nullable: false
+    distinct_count: 1
+    min: 1
+    max: 1
+  aciks:
+    type: string
+    nullable: true
+    distinct_count: 0

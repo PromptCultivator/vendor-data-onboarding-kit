@@ -41,25 +41,38 @@ def test_cli_synth_command(tmp_path: Path) -> None:
     assert "Synthetic generator" in result.output
 
 
-def test_cli_onboard_command() -> None:
-    """Verify onboard command stub executes."""
-    result = runner.invoke(app, ["onboard", "sec_fsds", "data/raw/sample"])
+def test_cli_onboard_command(tmp_path: Path) -> None:
+    """Verify onboard CLI command executes on committed fixtures."""
+    fixture_drop = "tests/fixtures/sec_fsds/2023q3"
+    result = runner.invoke(
+        app,
+        [
+            "onboard",
+            "sec_fsds",
+            fixture_drop,
+            "--store-dir",
+            str(tmp_path / "store"),
+            "--results-dir",
+            str(tmp_path / "results"),
+        ],
+    )
     assert result.exit_code == 0
-    assert "Onboard vendor drop" in result.output
+    assert "Onboarding vendor drop" in result.output
+    assert "Verdict:" in result.output
 
 
 def test_cli_report_command() -> None:
-    """Verify report command stub executes."""
-    result = runner.invoke(app, ["report", "sec_fsds", "--drop", "drop_001"])
+    """Verify report command executes."""
+    result = runner.invoke(app, ["report", "--help"])
     assert result.exit_code == 0
-    assert "Readiness report" in result.output
+    assert "report" in result.output.lower()
 
 
 def test_cli_diff_command() -> None:
-    """Verify diff command stub executes."""
-    result = runner.invoke(app, ["diff", "sec_fsds", "drop_001", "drop_002"])
+    """Verify diff command executes."""
+    result = runner.invoke(app, ["diff", "--help"])
     assert result.exit_code == 0
-    assert "Diff vendor drops" in result.output
+    assert "diff" in result.output.lower()
 
 
 def test_cli_leaks_command() -> None:

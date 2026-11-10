@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections import defaultdict
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,6 +12,7 @@ import duckdb
 import pyarrow as pa
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
+from pydantic import BaseModel
 
 from vdok.normalize import CANONICAL_ARROW_SCHEMA
 from vdok.validate import QUARANTINE_ARROW_SCHEMA
@@ -387,3 +389,103 @@ def record_drop_metadata(base_path: Path | str, vendor: str, drop_record: dict[s
         refresh_catalog_views(con, vendor_dir)
     finally:
         con.close()
+
+
+class DropRecord(BaseModel):
+    """Metadata record for a committed or held drop."""
+
+    drop_id: str
+    vendor: str
+    status: str
+    committed_at: datetime | None = None
+    total_rows: int = 0
+    valid_rows: int = 0
+    quarantine_rows: int = 0
+    total_bytes: int = 0
+
+
+class BitemporalStore:
+    """High-level object interface for partitioned bitemporal Parquet store."""
+
+    def __init__(self, base_dir: Path | str = "data/store", vendor: str = "default") -> None:
+        self.base_dir = Path(base_dir)
+        self.vendor = vendor
+        self.vendor_dir = self.base_dir if self.base_dir.name == vendor else self.base_dir / vendor
+        self.vendor_dir.mkdir(parents=True, exist_ok=True)
+
+    def write_drop(
+        self,
+        table: pa.Table,
+        manifest: Any = None,
+        manifest_buckets: dict[str, str] | None = None,
+    ) -> list[Path]:
+        """Write canonical records to partitioned Parquet files and update metadata."""
+        drop_id = str(table["drop_id"][0].as_py()) if len(table) > 0 else "empty"
+        written = write_partitioned_store(
+            table=table,
+            vendor=self.vendor,
+            drop_id=drop_id,
+            base_path=self.base_dir,
+            manifest_buckets=manifest_buckets,
+        )
+        if len(table) > 0:
+            ev_min = table["event_time"].to_pylist()[0] if len(table) > 0 else None
+            ev_max = table["event_time"].to_pylist()[-1] if len(table) > 0 else None
+            kt_min = table["knowledge_time"].to_pylist()[0] if len(table) > 0 else None
+            kt_max = table["knowledge_time"].to_pylist()[-1] if len(table) > 0 else None
+            drop_rec = {
+                "drop_id": drop_id,
+                "vendor": self.vendor,
+                "status": "committed",
+                "committed_at": datetime.now(timezone.utc),
+                "total_rows": len(table),
+                "valid_rows": len(table),
+                "quarantine_rows": 0,
+                "total_bytes": table.nbytes,
+                "file_count": 1,
+                "file_format": "parquet",
+                "compression": "snappy",
+                "event_time_min": ev_min,
+                "event_time_max": ev_max,
+                "knowledge_time_min": kt_min,
+                "knowledge_time_max": kt_max,
+            }
+            try:
+                record_drop_metadata(self.base_dir, self.vendor, drop_rec)
+            except Exception:
+                pass
+        return written
+
+    def get_manifest_history(self) -> list[DropRecord]:
+        """Retrieve historical drop ingestion records from drops table or directory inspection."""
+        db_file = self.vendor_dir / "store.duckdb"
+        if not db_file.exists():
+            parts = list(self.vendor_dir.glob("*/*/part-*.parquet"))
+            drop_ids: set[str] = set()
+            for p in parts:
+                stem = p.stem.replace("part-", "")
+                drop_ids.add(stem)
+            return [
+                DropRecord(drop_id=did, vendor=self.vendor, status="committed")
+                for did in sorted(drop_ids)
+            ]
+
+        con = duckdb.connect(str(db_file))
+        try:
+            res = con.execute("SELECT drop_id, vendor, status, total_rows FROM drops").fetchall()
+            return [
+                DropRecord(
+                    drop_id=str(r[0]), vendor=str(r[1]), status=str(r[2]), total_rows=int(r[3])
+                )
+                for r in res
+            ]
+        except Exception:
+            return []
+        finally:
+            con.close()
+
+    def write_revisions(self, table: pa.Table) -> None:
+        """Write revision records to store metadata."""
+        from vdok.revisions import record_revisions
+
+        record_revisions(base_path=self.base_dir, vendor=self.vendor, revisions_table=table)

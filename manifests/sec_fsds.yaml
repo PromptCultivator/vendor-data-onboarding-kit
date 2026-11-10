@@ -1,0 +1,19 @@
+vendor: sec_fsds
+entity_columns:
+  - cik
+entity_id_type: cik
+event_time_column: ddate
+event_time_format: "%Y%m%d"
+knowledge_time:
+  source: column
+  column: filed
+  format: "%Y%m%d"
+timezone: UTC
+value_columns:
+  - value
+unit_column: uom
+field_columns:
+  - tag
+expected_calendar: quarterly
+expected_universe: null
+rules: rules/sec_fsds.yaml

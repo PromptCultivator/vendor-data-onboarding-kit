@@ -65,18 +65,116 @@ def synth(
 def onboard(
     vendor: str = typer.Argument(..., help="Vendor identifier"),
     drop: str = typer.Argument(..., help="Path to raw drop directory or archive"),
+    as_of: Optional[str] = typer.Option(
+        None, "--as-of", help="Override knowledge timestamp (ISO 8601 string)"
+    ),
+    manifest: Optional[str] = typer.Option(
+        None, "--manifest", "-m", help="Path to vendor manifest YAML"
+    ),
+    rules: Optional[str] = typer.Option(
+        None, "--rules", "-r", help="Path to validation rules YAML"
+    ),
+    symbols: Optional[str] = typer.Option(
+        None, "--symbols", "-s", help="Path to symbol master Parquet"
+    ),
+    store_dir: str = typer.Option("data/store", "--store-dir", help="Base store directory"),
+    results_dir: str = typer.Option(
+        "data/results", "--results-dir", help="Base results directory for reports"
+    ),
+    force: bool = typer.Option(False, "--force", "-f", help="Force re-ingestion if drop exists"),
 ) -> None:
     """Onboard a vendor drop into the bitemporal store."""
-    typer.echo(f"Onboard vendor drop: vendor={vendor}, drop={drop}")
+    import datetime
+
+    import dateutil.parser
+
+    from vdok.onboard import onboard_drop
+
+    p_drop = Path(drop)
+    if not p_drop.exists():
+        typer.echo(f"Error: Drop path does not exist: {drop}", err=True)
+        raise typer.Exit(code=2)
+
+    as_of_dt: datetime.datetime | None = None
+    if as_of:
+        try:
+            as_of_dt = dateutil.parser.isoparse(as_of)
+            if as_of_dt.tzinfo is None:
+                as_of_dt = as_of_dt.replace(tzinfo=datetime.timezone.utc)
+        except Exception as exc:
+            typer.echo(f"Error: Invalid --as-of timestamp '{as_of}': {exc}", err=True)
+            raise typer.Exit(code=2)
+
+    typer.echo(f"Onboarding vendor drop: vendor={vendor}, drop={drop}")
+    try:
+        rep, exit_code = onboard_drop(
+            vendor=vendor,
+            drop_path=p_drop,
+            manifest_path=manifest,
+            rules_path=rules,
+            symbol_master_path=symbols,
+            store_dir=store_dir,
+            results_dir=results_dir,
+            as_of=as_of_dt,
+            force=force,
+        )
+    except FileNotFoundError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"Onboarding failure: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"Verdict: {rep.verdict.value}")
+    typer.echo(f"Reason: {rep.verdict_reason}")
+    typer.echo(f"Report written to: {results_dir}/{vendor}/{rep.drop_id}/report.md")
+
+    if exit_code != 0:
+        raise typer.Exit(code=exit_code)
 
 
 @app.command()
 def report(
     vendor: str = typer.Argument(..., help="Vendor identifier"),
     drop: Optional[str] = typer.Option(None, "--drop", help="Drop identifier to report on"),
+    results_dir: str = typer.Option(
+        "data/results", "--results-dir", help="Base directory where reports reside"
+    ),
+    json_output: bool = typer.Option(False, "--json-output", help="Output report in JSON format"),
 ) -> None:
-    """Generate a vendor readiness report."""
-    typer.echo(f"Readiness report: vendor={vendor}, drop={drop}")
+    """Generate or display a vendor readiness report."""
+    from vdok.report import load_report
+
+    target_drop = drop
+    if target_drop is None:
+        v_results = Path(results_dir) / vendor
+        if v_results.exists():
+            subdirs = [
+                d for d in v_results.iterdir() if d.is_dir() and (d / "report.json").exists()
+            ]
+            if subdirs:
+                subdirs.sort(key=lambda d: (d / "report.json").stat().st_mtime, reverse=True)
+                target_drop = subdirs[0].name
+
+    if target_drop is None:
+        typer.echo(
+            f"Error: No report found for vendor '{vendor}'. Provide --drop <drop_id>.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    rep = load_report(vendor=vendor, drop_id=target_drop, base_dir=results_dir)
+    if rep is None:
+        typer.echo(
+            f"Error: Report not found for vendor '{vendor}' and drop '{target_drop}'.",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    if json_output:
+        typer.echo(rep.to_json())
+    else:
+        typer.echo(rep.to_markdown())
 
 
 @app.command()
@@ -84,9 +182,30 @@ def diff(
     vendor: str = typer.Argument(..., help="Vendor identifier"),
     drop_a: str = typer.Argument(..., help="First drop identifier"),
     drop_b: str = typer.Argument(..., help="Second drop identifier"),
+    store_dir: str = typer.Option("data/store", "--store-dir", help="Base store directory"),
+    json_output: bool = typer.Option(False, "--json-output", help="Output diff in JSON format"),
 ) -> None:
     """Compare two vendor drops and emit differences."""
-    typer.echo(f"Diff vendor drops: vendor={vendor}, drop_a={drop_a}, drop_b={drop_b}")
+    from vdok.report import diff_drops
+
+    try:
+        diff_res = diff_drops(
+            store_dir=store_dir,
+            vendor=vendor,
+            drop_a=drop_a,
+            drop_b=drop_b,
+        )
+    except FileNotFoundError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(code=2) from exc
+    except Exception as exc:
+        typer.echo(f"Diff execution failure: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    if json_output:
+        typer.echo(diff_res.to_json())
+    else:
+        typer.echo(diff_res.to_markdown())
 
 
 @app.command()

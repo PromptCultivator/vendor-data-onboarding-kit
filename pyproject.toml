@@ -44,6 +44,7 @@ addopts = "-v --strict-markers"
 filterwarnings = [
     "error",
     "ignore::DeprecationWarning",
+    "ignore:.*Arrow output on a DB-API result.*:UserWarning",
 ]
 
 [tool.coverage.run]

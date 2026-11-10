@@ -1,0 +1,16 @@
+vendor: synthetic
+entity_columns:
+  - entity_id
+entity_id_type: ticker
+event_time_column: event_time
+event_time_format: "%Y-%m-%d %H:%M:%S"
+knowledge_time:
+  source: drop_time
+timezone: UTC
+value_columns:
+  - price
+unit_column: unit
+field_columns: []
+expected_calendar: daily
+expected_universe: null
+rules: rules/synthetic.yaml

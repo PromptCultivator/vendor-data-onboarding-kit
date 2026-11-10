@@ -75,7 +75,10 @@ class SyntheticGenerator:
     ) -> None:
         self.seed = seed
         self.size_bytes = size_bytes
-        self.faults_config = faults
+        if isinstance(faults, str) and faults.lower() not in ("default", "none"):
+            self.faults_config = [f.strip() for f in faults.split(",") if f.strip()]
+        else:
+            self.faults_config = faults
         self.format = format.lower()
 
     def _resolve_fault_flags(self, drop_idx: int) -> dict[str, Any]:

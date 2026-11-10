@@ -289,6 +289,28 @@ class ValidationResult(BaseModel):
     def severity_counts(self) -> dict[str, int]:
         return self.summary.severity_counts
 
+    @property
+    def clean_table(self) -> pa.Table:
+        return self.valid_table
+
+    @property
+    def held_reasons(self) -> list[str]:
+        return self.summary.hold_reasons
+
+    @property
+    def total_evaluated(self) -> int:
+        return self.summary.total_rows
+
+    @property
+    def top_reasons(self) -> list[dict[str, Any]]:
+        items = [
+            {"reason": k, "count": v, "severity": "quarantine"}
+            for k, v in self.rule_counts.items()
+            if v > 0
+        ]
+        items.sort(key=lambda x: x["count"], reverse=True)
+        return items
+
 
 # 5. Rule Compiler
 

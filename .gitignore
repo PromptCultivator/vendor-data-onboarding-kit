@@ -1,4 +1,4 @@
-# Byte-compiled / optimized / DLL files
+# Byte-compiled / DLL files
 __pycache__/
 *.py[cod]
 *$py.class
@@ -50,6 +50,7 @@ coverage.xml
 # Type checking & linting
 .mypy_cache/
 .ruff_cache/
+.pyright_cache/
 .dmypy.json
 dmypy.json
 
@@ -64,6 +65,14 @@ dmypy.json
 # Temporary files
 /tmp/
 *.tmp
+
+# Data directories (Section 4)
+data/raw/*
+data/store/*
+data/results/*
+!data/raw/.gitkeep
+!data/store/.gitkeep
+!data/results/.gitkeep
 
 # Teamwork agent state
 .agents/

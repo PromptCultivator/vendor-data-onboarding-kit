@@ -8,6 +8,7 @@ from typing import Optional
 import typer
 
 from vdok import __version__
+from vdok.adapters.synthetic import generate_synthetic_sequence
 from vdok.schema import (
     accept_schema_changes,
     check_schema,
@@ -39,9 +40,25 @@ def synth(
     size_gb: str = typer.Option("1", "--size-gb", help="Target size in gigabytes"),
     seed: int = typer.Option(1, "--seed", help="Random seed for reproducibility"),
     faults: str = typer.Option("default", "--faults", help="Planted fault configuration"),
+    output_dir: str = typer.Option(
+        "data/raw/synthetic", "--output-dir", help="Output directory path"
+    ),
+    format: str = typer.Option("csv", "--format", help="File format (csv, parquet, jsonl)"),
+    num_drops: int = typer.Option(3, "--num-drops", help="Number of sequential drops to produce"),
 ) -> None:
     """Generate synthetic vendor drop sequence with planted faults."""
-    typer.echo(f"Synthetic generator: size_gb={size_gb}, seed={seed}, faults={faults}")
+    out_path = Path(output_dir)
+    res_path = generate_synthetic_sequence(
+        output_dir=out_path,
+        size_gb=size_gb,
+        seed=seed,
+        faults=faults,
+        num_drops=num_drops,
+        format=format,
+    )
+    typer.echo(
+        f"Synthetic generator: size_gb={size_gb}, seed={seed}, faults={faults} -> {res_path}"
+    )
 
 
 @app.command()

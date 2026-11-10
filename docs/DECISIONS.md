@@ -17,6 +17,9 @@ This document records explicit choices made when specifications offer implementa
 | D-009 | Uncompressed Payload Hashing for Gzip Drop Identity | 2026-11-10 | Accepted |
 | D-010 | Prioritized JSON Lines Stream Inspection Ahead of CSV Sniffing | 2026-11-10 | Accepted |
 | D-011 | Exact Fixed-Point Decimal Enforcement for Monetary Columns | 2026-11-10 | Accepted |
+| D-012 | Elimination of CLI Test Facades in Favor of Authentic Fixtures | 2026-11-10 | Accepted |
+| D-013 | DuckDB Programmatic Relation API for Path Safety | 2026-11-10 | Accepted |
+| D-014 | Format Sniffer Extension and Decompression Error Wrapping | 2026-11-10 | Accepted |
 
 
 ---
@@ -165,5 +168,45 @@ This document records explicit choices made when specifications offer implementa
 - **Decision:** Implement option 2: enforce exact fixed-point Decimal parsing on monetary fields across CSV, JSONL, and Parquet data.
 - **Justification:** Eliminates binary floating-point representation drift and rounding inaccuracies on financial values.
 - **Test Guarantee Impact:** Inferred monetary columns are typed as `decimal` with preserved scale, preventing float conversion across tabular feeds.
+
+---
+
+### D-012: Elimination of CLI Test Facades in Favor of Authentic Fixtures
+
+- **Date:** 2026-11-10
+- **Context:** Early scaffold tests in `test_smoke.py` used placeholder strings (`sample_drop/`) causing facade branches to be added to `vdok/cli.py`.
+- **Options Considered:**
+  1. Retain facade branches for backward compatibility with scaffold tests.
+  2. Completely eliminate all hardcoded facade branches, require explicit arguments, enforce exit code 2 on missing inputs, and update smoke tests to run against committed fixtures with isolated temporary schema directories.
+- **Decision:** Implement option 2.
+- **Justification:** Production code must never contain input-specific branching that returns synthetic success strings solely to placate legacy test assertions.
+- **Test Guarantee Impact:** Guarantees authentic execution of CLI commands and enforces standard exit codes (0 for success, 1 for hold/failure, 2 for missing arguments or missing files).
+
+---
+
+### D-013: DuckDB Programmatic Relation API for Path Safety
+
+- **Date:** 2026-11-10
+- **Context:** Constructing SQL queries via Python f-strings in `vdok/schema.py` failed on filesystem paths containing single quotes.
+- **Options Considered:**
+  1. Escape single quotes in path strings before SQL interpolation.
+  2. Migrate to DuckDB's Python relation methods (`con.read_csv` and `con.read_json`).
+- **Decision:** Implement option 2: pass file paths directly to `con.read_csv` and `con.read_json`, followed by `.limit(max_sample_rows).to_arrow_table()`.
+- **Justification:** Completely removes query string compilation for file paths, preventing syntax crashes and potential SQL injection vulnerabilities.
+- **Test Guarantee Impact:** Guarantees schema inference operates on paths with arbitrary characters, spaces, and single quotes.
+
+---
+
+### D-014: Format Sniffer Extension and Decompression Error Wrapping
+
+- **Date:** 2026-11-10
+- **Context:** Edge case feeds such as single-column CSVs, gzipped files with leading empty lines, or corrupted DEFLATE streams triggered false-positive errors or unhandled `zlib.error` exceptions.
+- **Options Considered:**
+  1. Require all CSV files to have at least two columns and no leading blank lines.
+  2. Expand discovery sniffer to recognize single-column CSVs, scan up to 50 lines skipping blank lines, verify absence of binary null bytes in decompressed gzip streams, catch `zlib.error` as `CorruptedArchiveError`, and validate `drop_id` format in idempotency checks.
+- **Decision:** Implement option 2.
+- **Justification:** Financial universes often arrive as 1-column ticker or CIK feeds, and archives with damaged DEFLATE streams must raise typed exceptions per discovery contract.
+- **Test Guarantee Impact:** Guarantees correct classification of single-column tables, leading blank lines tolerance, and exception boundaries across all drop formats.
+
 
 

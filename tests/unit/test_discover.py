@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 import gzip
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -281,7 +281,7 @@ def test_discover_leading_empty_lines_tolerance_csv_gz(tmp_path: Path) -> None:
 
 
 def test_discover_corrupted_gzip_deflate_stream_raises_corrupted_archive(tmp_path: Path) -> None:
-    """Verify corrupted DEFLATE streams trigger CorruptedArchiveError instead of leaking zlib.error."""
+    """Verify corrupted DEFLATE streams trigger CorruptedArchiveError without leaking."""
     valid_data = b"cik,event_time,value\n" + b"".join(
         f"0000320193,2023-12-31,{i}\n".encode("utf-8") for i in range(50)
     )

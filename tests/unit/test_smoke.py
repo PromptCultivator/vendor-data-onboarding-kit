@@ -123,7 +123,14 @@ def test_cli_schema_missing_arguments_error(tmp_path: Path) -> None:
     # Check with non-existent schema
     check_res = runner.invoke(
         app,
-        ["schema", "check", "nonexistent_vendor", "tests/fixtures/drops/baseline_csv", "--schema-dir", str(tmp_path)],
+        [
+            "schema",
+            "check",
+            "nonexistent_vendor",
+            "tests/fixtures/drops/baseline_csv",
+            "--schema-dir",
+            str(tmp_path),
+        ],
     )
     assert check_res.exit_code == 2
     assert "Pinned schema not found" in check_res.output

@@ -221,7 +221,10 @@ def test_schema_infer_path_with_single_quotes_csv(tmp_path: Path) -> None:
     quote_dir = tmp_path / "vendor's_drop"
     quote_dir.mkdir()
     f = quote_dir / "data'with'quote.csv"
-    f.write_text("record_id,amount,description\n1,123.45,item_a\n2,678.90,item_b\n", encoding="utf-8")
+    f.write_text(
+        "record_id,amount,description\n1,123.45,item_a\n2,678.90,item_b\n",
+        encoding="utf-8",
+    )
 
     schema = infer_schema(quote_dir, vendor="quoted_vendor")
     assert "record_id" in schema.columns

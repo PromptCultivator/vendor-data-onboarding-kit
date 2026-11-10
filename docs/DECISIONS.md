@@ -11,6 +11,9 @@ This document records explicit choices made when specifications offer implementa
 | D-003 | Typer Console CLI Interface with Subcommand Tree | 2026-11-10 | Accepted |
 | D-004 | Pyright Static Typechecking Baseline | 2026-11-10 | Accepted |
 | D-005 | Smoke Benchmark Exit Code and Invariant Check | 2026-11-10 | Accepted |
+| D-006 | Makefile Setup Virtual Environment Creation and Exact Sync | 2026-11-10 | Accepted |
+| D-007 | Pyright Local Virtual Environment Discovery Configuration | 2026-11-10 | Accepted |
+
 
 ---
 
@@ -78,3 +81,32 @@ This document records explicit choices made when specifications offer implementa
 - **Decision:** Implement `bench/run.py` supporting `--smoke` that verifies invocation arguments and asserts zero violations.
 - **Justification:** Provides an executable contract for continuous integration pipelines in Phase 0 ahead of the full benchmark implementation in Phase 7.
 - **Test Guarantee Impact:** Verifies that CI fails if benchmark invariants are broken.
+
+---
+
+### D-006: Makefile Setup Virtual Environment Creation and Exact Sync
+
+- **Date:** 2026-11-10
+- **Context:** Section 9 defines `make setup` as "create venv, install pinned deps". The initial target executed `uv pip install -e ".[dev]"` without checking for existence of `.venv` or pruning extraneous packages. Furthermore, ambient `$VIRTUAL_ENV` shell variables could target unintended outer environments.
+- **Options Considered:**
+  1. Rely on developers or CI to execute `uv venv` manually prior to `make setup`.
+  2. Add unconditional `uv venv .venv` in the recipe (overwriting existing state on every run).
+  3. Guard venv creation with `@test -d $(VENV) || uv venv $(VENV)`, synchronize packages via `uv pip install --exact -e ".[dev]"`, and export `VIRTUAL_ENV := $(abspath $(VENV))`.
+- **Decision:** Implement option 3: set `export VIRTUAL_ENV := $(abspath $(VENV))` and update `setup:` to test directory existence before creating, then install with `--exact`.
+- **Justification:** Ensures complete idempotency on subsequent runs while guaranteeing that fresh checkouts initialize correctly and extraneous or legacy packages are pruned to match declared dependencies.
+- **Test Guarantee Impact:** Guarantees that `git clone && make setup && make test` succeeds from scratch in isolated environments without residual unapproved packages.
+
+---
+
+### D-007: Pyright Local Virtual Environment Discovery Configuration
+
+- **Date:** 2026-11-10
+- **Context:** Section 9 and Section 10 specify `pyright` for static type checking. Direct invocations of `.venv/bin/pyright` or IDE language server processes without an activated shell fell back to system Python search paths, causing unresolved import diagnostics for packages located in `.venv`.
+- **Options Considered:**
+  1. Require developers and IDEs to activate `.venv` or configure local environment variables manually.
+  2. Add `venvPath = "."`, `venv = ".venv"`, and `exclude = [".venv"]` directly under `[tool.pyright]` in `pyproject.toml`.
+  3. Switch to strict mode with external type stubs.
+- **Decision:** Implement option 2: declare `venvPath = "."`, `venv = ".venv"`, and `exclude = [".venv"]` in `pyproject.toml` while retaining `typeCheckingMode = "standard"`.
+- **Justification:** Pyright automatically resolves imported packages from the repository virtual environment across all execution contexts (Make, bare CLI, and IDE LSPs). Standard mode avoids false-positive missing stub diagnostics for dependencies like `pyarrow` that lack bundled stubs.
+- **Test Guarantee Impact:** Ensures both `make typecheck` and direct `.venv/bin/pyright` CLI invocations pass with 0 errors and 0 warnings.
+

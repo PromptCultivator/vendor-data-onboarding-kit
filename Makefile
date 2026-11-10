@@ -7,12 +7,14 @@ FAULTS ?= default
 VENDOR ?= sec_fsds
 DROP ?=
 VENV ?= .venv
+export VIRTUAL_ENV := $(abspath $(VENV))
 export PATH := $(VENV)/bin:$(PATH)
 
 .PHONY: setup lint typecheck test data synth onboard report bench bench-smoke goldens docker
 
 setup:
-	uv pip install -e ".[dev]"
+	@test -d $(VENV) || uv venv $(VENV)
+	uv pip install --exact -e ".[dev]"
 
 lint:
 	ruff check .

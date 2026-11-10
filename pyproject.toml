@@ -64,5 +64,8 @@ ignore = []
 
 [tool.pyright]
 include = ["vdok", "tests", "bench"]
+exclude = [".venv"]
+venvPath = "."
+venv = ".venv"
 pythonVersion = "3.12"
 typeCheckingMode = "standard"

@@ -10,14 +10,14 @@ Traditional data ingestion pipelines overwrite previous records with new values,
 
 ## 2. Restatement Detection Algorithm
 
-Following the validation and ingestion of drop $N$, the revision engine compares the new drop against all prior committed vintages in the store.
+Following the validation and ingestion of drop N, the revision engine compares the new drop against all prior committed vintages in the store.
 
 A record is classified as a restatement if:
 1. It shares an identical logical key `(entity_id, field, event_time)` with an existing record.
 2. The incoming record has a later knowledge timestamp:
-   $$t_{\text{knowledge, new}} > t_{\text{knowledge, old}}$$
+   `t_knowledge_new > t_knowledge_old`
 3. The observation payload differs beyond floating-point rounding tolerance:
-   $$|v_{\text{num, new}} - v_{\text{num, old}}| > \epsilon \quad \lor \quad v_{\text{str, new}} \neq v_{\text{str, old}} \quad \lor \quad u_{\text{new}} \neq u_{\text{old}}$$
+   `|v_num_new - v_num_old| > ε` or `v_str_new ≠ v_str_old` or `u_new ≠ u_old`
 
 ```sql
 SELECT
@@ -73,7 +73,7 @@ Restatements are recorded permanently in `data/store/<vendor>/metadata/revisions
 | `new_knowledge_time`| `timestamp[us, UTC]` | Publication timestamp of the restated value |
 | `old_drop_id` | `string` | Originating drop ID of the prior vintage |
 | `new_drop_id` | `string` | Originating drop ID of the restating drop |
-| `relative_change` | `float64` | Fractional delta: $(V_{\text{new}} - V_{\text{old}}) / |V_{\text{old}}|$ |
+| `relative_change` | `float64` | Fractional delta: `(V_new - V_old) / |V_old|` |
 | `detected_at` | `timestamp[us, UTC]` | Ingestion execution timestamp |
 
 ---
@@ -97,5 +97,5 @@ The diff engine classifies records into four disjoint subsets:
 ## 5. Vendor Behavior Diagnostics
 
 The revision ledger provides operational signals regarding vendor data management practices:
-- **High Revision Rates**: If $> 5\%$ of a vendor's historical records undergo revision per drop, data quality warnings are surfaced.
+- **High Revision Rates**: If > 5% of a vendor's historical records undergo revision per drop, data quality warnings are surfaced.
 - **Zero Revisions Alert**: If a vendor reports zero revisions across four or more consecutive drops for macroeconomic or financial datasets known to undergo regular adjustment, the engine alerts operators to possible data freezing or lack of revision tracking on the vendor's side.

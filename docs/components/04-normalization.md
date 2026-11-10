@@ -78,7 +78,7 @@ Measurement units are mapped against an immutable reference table:
 | `USD`, `usd`, `US$`, `dollars` | `USD` |
 | `shares`, `Shares`, `SHARES` | `shares` |
 | `pure`, `scalar`, `dimensionless` | `pure` |
-| `%`, `percent`, `pct` | `ratio` (scaled: $100\% = 1.0$) |
+| `%`, `percent`, `pct` | `ratio` (scaled: 100% = 1.0) |
 
 ### 3.4 Identifier Folding
 String identifiers are stripped of leading and trailing whitespace, and alphanumeric codes (such as ticker symbols) are converted to uppercase.
@@ -89,6 +89,8 @@ String identifiers are stripped of leading and trailing whitespace, and alphanum
 
 To verify row uniqueness and detect silent data modifications, each record receives a SHA-256 fingerprint:
 
-$$\text{row\_hash} = \text{SHA256}(\text{entity\_id} \mathbin{\Vert} \text{field} \mathbin{\Vert} t_{\text{event}} \mathbin{\Vert} v_{\text{num}} \mathbin{\Vert} v_{\text{str}} \mathbin{\Vert} \text{unit})$$
+```
+row_hash = SHA256(entity_id || field || event_time || value_num || value_str || unit)
+```
 
 This hash is calculated after canonicalization, providing an invariant signature that is independent of serialization formatting.

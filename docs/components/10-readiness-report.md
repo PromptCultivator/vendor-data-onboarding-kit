@@ -22,11 +22,11 @@ data/results/<vendor>/<drop_id>/
 
 1. **Verdict Header**:
    - `READY`: All validation checks passed, zero quarantine records, no schema drift.
-   - `READY WITH WARNINGS`: Minor anomalies detected (e.g., warnings logged, quarantine ratio $< 0.1\%$).
+   - `READY WITH WARNINGS`: Minor anomalies detected (e.g., warnings logged, quarantine ratio < 0.1%).
    - `HELD`: Batch rule failure, schema incompatibility, or duplicate ratio breach. Clear justification stated.
 2. **Drop Metadata Summary**:
    - File counts, raw bytes, total records, distinct entities, and distinct fields.
-   - Temporal spans: $[T_{\text{event, min}}, T_{\text{event, max}}]$ and $[T_{\text{knowledge, min}}, T_{\text{knowledge, max}}]$.
+   - Temporal spans: [T_event_min, T_event_max] and [T_knowledge_min, T_knowledge_max].
 3. **Schema Status & Drift**:
    - Active pinned schema contract version.
    - Detected schema drift items with proposed updates for human review.
@@ -38,12 +38,12 @@ data/results/<vendor>/<drop_id>/
    - Quarantine percentage of total payload.
    - Frequency breakdown of top quarantine causes.
 6. **Symbology Resolution Metrics**:
-   - Successfully resolved identifier percentage ($N_{\text{mapped}} / N_{\text{total}}$).
+   - Successfully resolved identifier percentage (N_mapped / N_total).
    - Frequency listing of top unresolved entity codes.
 7. **Revision Ledger Analytics**:
    - Restatement percentage across active fields.
    - Ranking of top restatements by absolute relative change.
-   - Stale vendor alert if zero revisions are observed across $> 3$ consecutive periods.
+   - Stale vendor alert if zero revisions are observed across > 3 consecutive periods.
 8. **Deterministic Vendor Inquiries**:
    - Email and ticketing drafts compiled from pre-defined templates keyed directly to failed rules.
 9. **Resource Execution Profile**:

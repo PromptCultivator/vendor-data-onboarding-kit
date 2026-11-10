@@ -27,9 +27,9 @@ To balance verification depth with execution speed on large datasets, the engine
 ### 2.3 Statistical Attributes Computed
 For each column, the inference engine computes:
 - Data type classification.
-- Nullability ratio ($N_{\text{null}} / N_{\text{sample}}$).
+- Nullability ratio (N_null / N_sample).
 - Approximate distinct values (HyperLogLog or exact count).
-- Numeric or temporal bounds: $\min$ and $\max$ values.
+- Numeric or temporal bounds: minimum and maximum values.
 
 ---
 
@@ -80,9 +80,9 @@ When a drop is onboarded against an existing pinned schema, the engine computes 
 | Drift Category | Severity | Description | Operational Response |
 |---|---|---|---|
 | `removed_column` | `hold` | A column present in pinned schema is absent from drop | Halts drop immediately; writes to `held_drops` |
-| `type_widened` | `hold` | Data type expanded incompatibly (e.g., `integer` $\to$ `string`) | Halts drop immediately; writes to `held_drops` |
+| `type_widened` | `hold` | Data type expanded incompatibly (e.g., `integer` → `string`) | Halts drop immediately; writes to `held_drops` |
 | `added_column` | `warn` | A new column appears in drop that is not in pinned schema | Logs warning; ignores extra column or passes with notice |
-| `type_narrowed` | `warn` | Data type tightened compatibly (e.g., `float` $\to$ `integer`) | Logs warning; accepts drop |
+| `type_narrowed` | `warn` | Data type tightened compatibly (e.g., `float` → `integer`) | Logs warning; accepts drop |
 | `nullability_change` | `warn` | Column declared non-nullable now contains null values | Logs warning; routes affected rows to quarantine |
 
 ---

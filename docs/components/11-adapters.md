@@ -20,7 +20,7 @@ The SEC publishes quarterly zip archives containing four tab-delimited relationa
 - `tag.txt`: Taxonomy tag definitions and accounting labels.
 - `pre.txt`: Statement presentation hierarchy.
 
-Files are acquired via `make data` with compliant rate-limiting ($\le 5\text{ req/sec}$) and an explicit user agent declaration (`User-Agent: vendor-data-onboarding-kit <email>`).
+Files are acquired via `make data` with compliant rate-limiting (≤ 5 req/sec) and an explicit user agent declaration (`User-Agent: vendor-data-onboarding-kit <email>`).
 
 ### 2.2 Relational Joining & Field Mapping
 The adapter executes an inner join between `num` and `sub` on Accession Number (`adsh`):

@@ -19,7 +19,7 @@ Quantitative research pipelines often suffer from data integrity failures:
 The architecture enforces three structural guarantees verified by automated test suites:
 
 - **Guarantee 1 (G1) — Append-Only Physical Storage**: The underlying data store operates without update or delete operations. Incoming data files are written once. Re-writing to an existing partition is rejected.
-- **Guarantee 2 (G2) — Strict Point-in-Time Isolation**: Queries evaluated as of historical knowledge timestamp $K$ never expose values whose visibility timestamp occurred after $K$. This eliminates look-ahead bias in backtesting.
+- **Guarantee 2 (G2) — Strict Point-in-Time Isolation**: Queries evaluated as of historical knowledge timestamp K never expose values whose visibility timestamp occurred after K. This eliminates look-ahead bias in backtesting.
 - **Guarantee 3 (G3) — Drop Ingestion Idempotency**: Processing an identical drop repeatedly results in a no-operation state without duplicating rows or creating redundant storage files.
 
 ---
@@ -153,7 +153,7 @@ Data validation applies severity tiers to prevent corrupted data from entering r
 
 ### Severity Routing Logic
 - **Row-Level Rules**: Missing mandatory fields, range violations, invalid enum codes, non-monotonic timestamps per entity, or future-dated events send individual records to `quarantine.parquet` annotated with rejection reasons.
-- **Batch-Level Rules**: Structural schema discrepancies (column removal, type widening), abnormal drop size contractions ($< 0.5\times$ or $> 2.0\times$ trailing median), excessive duplicate ratios ($> 1\%$), or unexpected multi-period coverage dropouts place the entire drop in `hold` status.
+- **Batch-Level Rules**: Structural schema discrepancies (column removal, type widening), abnormal drop size contractions (< 0.5× or > 2.0× trailing median), excessive duplicate ratios (> 1%), or unexpected multi-period coverage dropouts place the entire drop in `hold` status.
 
 ---
 
@@ -184,9 +184,11 @@ File permissions are restricted to read-only (`0o444`) immediately following com
 
 ## 8. Point-in-Time Query Mechanics
 
-Point-in-time evaluation resolves the most recent observation known at or prior to historical timestamp $T_{\text{as\_of}}$:
+Point-in-time evaluation resolves the most recent observation known at or prior to historical timestamp T_as_of:
 
-$$\text{value}(E, F, T_{\text{event}}, T_{\text{as\_of}}) = \operatorname*{argmax}_{r \in \mathcal{R},\, r.t_{\text{knowledge}} \le T_{\text{as\_of}}} r.t_{\text{knowledge}}$$
+```
+value(E, F, T_event, T_as_of) = latest record where knowledge_time ≤ T_as_of
+```
 
 This query is compiled into vectorized DuckDB SQL execution:
 

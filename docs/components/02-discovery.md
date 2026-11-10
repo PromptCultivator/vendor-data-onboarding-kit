@@ -61,13 +61,13 @@ class DropMetadata:
 The `drop_id` represents a deterministic digest of the data payload. It is computed as follows:
 
 1. For each file in the drop, calculate the SHA-256 digest of the uncompressed data bytes:
-   $$H_i = \text{SHA256}(\text{payload}_i)$$
+   `H_i = SHA256(payload_i)`
 2. Sort all file hashes lexicographically:
-   $$\vec{H}_{\text{sorted}} = \operatorname{sort}([H_1, H_2, \dots, H_n])$$
+   `H_sorted = sort([H_1, H_2, ..., H_n])`
 3. Concatenate the sorted hashes and compute the parent digest:
-   $$H_{\text{drop}} = \text{SHA256}\left(\bigoplus_{i=1}^n H_{\text{sorted}, i}\right)$$
+   `H_drop = SHA256(H_sorted_1 + H_sorted_2 + ... + H_sorted_n)`
 4. Truncate the resulting hexadecimal string to 16 characters:
-   $$\text{drop\_id} = H_{\text{drop}}[0:16]$$
+   `drop_id = H_drop[0:16]`
 
 ```python
 import hashlib

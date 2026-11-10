@@ -82,8 +82,10 @@ FROM read_parquet(
 
 ## 5. Storage Expansion Accounting
 
-Because the store never overwrites older vintages, total disk footprint grows with each revision. The storage module measures and reports the **Storage Expansion Factor** ($S_f$):
+Because the store never overwrites older vintages, total disk footprint grows with each revision. The storage module measures and reports the **Storage Expansion Factor** (S_f):
 
-$$S_f = \frac{\text{Bytes on Disk (All Historical Vintages)}}{\text{Bytes Required for Latest Deduplicated Snapshot}}$$
+```
+S_f = Bytes on Disk (All Historical Vintages) / Bytes Required for Latest Deduplicated Snapshot
+```
 
 This metric enables engineering teams to monitor capacity expansion trends over multi-year ingestion schedules.

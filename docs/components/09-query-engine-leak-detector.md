@@ -2,9 +2,9 @@
 
 ## 1. Overview & Responsibility
 
-The `vdok.query` module provides point-in-time (PIT) retrieval interfaces and an automated leak detector. In quantitative investment research, look-ahead bias occurs when a strategy decision at historical time $T_{\text{decision}}$ accesses information that was not publicly known until $T_{\text{knowledge}} > T_{\text{decision}}$.
+The `vdok.query` module provides point-in-time (PIT) retrieval interfaces and an automated leak detector. In quantitative investment research, look-ahead bias occurs when a strategy decision at historical time T_decision accesses information that was not publicly known until T_knowledge > T_decision.
 
-`vdok.query` enforces **Guarantee 2 (G2)**: queries evaluated as of timestamp $T_{\text{as\_of}}$ strictly ignore records published after that timestamp. An audit logger and leak detector verify that quantitative backtests maintain strict temporal causality.
+`vdok.query` enforces **Guarantee 2 (G2)**: queries evaluated as of timestamp T_as_of strictly ignore records published after that timestamp. An audit logger and leak detector verify that quantitative backtests maintain strict temporal causality.
 
 ---
 
@@ -44,7 +44,7 @@ series = store.series(
 Queries filter partition files directly via DuckDB without pre-loading entire datasets into Python memory.
 
 ### 3.1 Point Query Window Execution
-To resolve the authoritative observation for key $(E, F, T_{\text{event}})$ known as of $T_{\text{as\_of}}$:
+To resolve the authoritative observation for key `(entity_id, field, event_time)` known as of `as_of`:
 
 ```sql
 SELECT entity_id, field, event_time, knowledge_time, value_num, value_str, unit
@@ -65,10 +65,10 @@ WHERE rank_idx = 1;
 
 ### 3.2 Guarantee 2 (G2) Verification
 The automated test suite verifies G2 by:
-1. Ingesting drop 1 where entity $E$ has value $V_1$ known at $T_1$.
-2. Ingesting drop 2 where entity $E$ is restated to value $V_2$ known at $T_2$ ($T_2 > T_1$).
-3. Executing `store.value(..., as_of=T_1)` and asserting that the returned value is exactly $V_1$.
-4. Executing `store.value(..., as_of=T_2)` and asserting that the returned value is $V_2$.
+1. Ingesting drop 1 where entity E has value V_1 known at T_1.
+2. Ingesting drop 2 where entity E is restated to value V_2 known at T_2 (where T_2 > T_1).
+3. Executing `store.value(..., as_of=T_1)` and asserting that the returned value is exactly V_1.
+4. Executing `store.value(..., as_of=T_2)` and asserting that the returned value is V_2.
 
 ---
 
@@ -105,8 +105,8 @@ vdok leaks --log data/audit/query_audit.jsonl --decision-time-column decision_ti
 
 The leak detector identifies two categories of temporal violations:
 1. **As-Of Leakage**: A query where the caller requested data with an `as_of` timestamp situated in the future relative to the trading decision:
-   $$T_{\text{as\_of}} > T_{\text{decision}}$$
+   `T_as_of > T_decision`
 2. **Knowledge Leakage**: A condition where the record returned by the store carries a publication timestamp exceeding the decision timestamp:
-   $$T_{\text{knowledge\_returned}} > T_{\text{decision}}$$
+   `T_knowledge_returned > T_decision`
 
 Any detected violation produces a detailed incident report pinpointing the source line, query parameters, and timestamp discrepancy.

@@ -66,7 +66,7 @@ rules:
 Row-level rules identify invalid records without interrupting the processing of valid data:
 
 1. **Not Null Checks**: Verifies mandatory fields (`entity_id`, `field`, `event_time`, `knowledge_time`).
-2. **Value Domain & Range Bounds**: Asserts numeric values fall within expected economic intervals (e.g., share counts $> 0$).
+2. **Value Domain & Range Bounds**: Asserts numeric values fall within expected economic intervals (e.g., share counts > 0).
 3. **Allowed Unit of Measure**: Confirms units belong to the recognized financial unit registry.
 4. **Monotone Timestamps**: Checks that observations for a given entity follow non-decreasing event time order.
 5. **Future Observation Guard**: Enforces that event time does not extend beyond knowledge time when the vendor reports historical events after publication.
@@ -89,16 +89,18 @@ Batch-level rules evaluate drop-wide aggregate metrics. When a batch rule fails,
 - The readiness report assigns a `HELD` verdict, preventing downstream systems from consuming incomplete or corrupted data.
 
 ### 4.1 Batch Volume Variance Check
-To detect partial file transmissions or truncated extracts, the row count $N_{\text{current}}$ is compared against the trailing median of the prior 7 completed drops:
+To detect partial file transmissions or truncated extracts, the row count N_current is compared against the trailing median of the prior 7 completed drops:
 
-$$0.5 \times \operatorname{median}(N_{t-7}, \dots, N_{t-1}) \le N_{\text{current}} \le 2.0 \times \operatorname{median}(N_{t-7}, \dots, N_{t-1})$$
+```
+0.5 × median(N_{t-7}, ..., N_{t-1}) ≤ N_current ≤ 2.0 × median(N_{t-7}, ..., N_{t-1})
+```
 
 Drops falling outside this boundary are placed on hold (initial drops are exempt).
 
 ### 4.2 Duplicate Ratio Escalation
 Duplicate observations sharing the same primary key `(entity_id, field, event_time, knowledge_time)` are evaluated:
-- If duplicate records comprise $\le 1.0\%$ of the drop, the duplicate occurrences are routed to `quarantine.parquet`, and valid records proceed.
-- If duplicate records exceed $1.0\%$, systematic feed corruption is assumed, and the batch rule escalates to a full `hold`.
+- If duplicate records comprise ≤ 1.0% of the drop, the duplicate occurrences are routed to `quarantine.parquet`, and valid records proceed.
+- If duplicate records exceed 1.0%, systematic feed corruption is assumed, and the batch rule escalates to a full `hold`.
 
 ### 4.3 Redundant Byte-Identical Drop Guard
 If a drop has the identical file hash sequence as the immediate predecessor drop, processing halts to prevent duplicate ingestion passes.

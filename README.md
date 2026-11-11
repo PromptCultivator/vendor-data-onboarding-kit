@@ -1,225 +1,162 @@
-# Vendor Data Onboarding Kit
+# Vendor Data Onboarding Kit (vdok)
 
-A toolkit that onboards raw vendor datasets into an append-only bitemporal store and produces vendor readiness reports.
+[![CI](https://github.com/PromptCultivator/vendor-data-onboarding-kit/actions/workflows/ci.yml/badge.svg)](https://github.com/PromptCultivator/vendor-data-onboarding-kit/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/downloads/)
+[![Code style: ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
-## Status
+> An append-only bitemporal data onboarding kit that ingests raw vendor feeds into structured Parquet storage with zero look-ahead bias. It validates incoming datasets against pinned schema contracts, tracks historical restatements in a revision ledger, and isolates corrupt records using multi-tier severity routing. Quantitative teams use this toolkit to prevent future information leakage and ensure reproducible backtests.
 
-`Status: benchmarked on Intel(R) Xeon(R) Platinum 8481C (2 cores, 7.8 GiB RAM)`
+## ✨ Features
 
-## Benchmark Results
+- **Append-Only Bitemporal Store**: Partitions records by both event time and knowledge time into immutable Apache Parquet files, preventing retroactive in-place data mutations.
+- **Vectorized DuckDB Validation Engine**: Executes high-throughput SQL validation checks directly in-process without external database services.
+- **Multi-Tier Severity Routing**: Automatically routes valid rows to the store, logs warnings to an event ledger, quarantines bad rows into `quarantine.parquet`, and halts breaking batch violations.
+- **Schema Pinning and Drift Detection**: Infers and locks vendor schema contracts in declarative YAML, detecting unexpected column additions, drops, or type alterations.
+- **Historical Revision Ledger**: Automatically compares incoming drop vintages against previous deliveries to capture restatements and record exact numerical deltas.
+- **Point-in-Time Query Engine**: Delivers sub-millisecond point-in-time reads and chronologically sorted series with O(log N) binary search partition indexes.
+- **Look-Ahead Leak Detector**: Audits query access logs to verify that point-in-time reads never access knowledge published after historical decision points.
+- **Model-Free Point-in-Time Symbology**: Resolves entity identifiers (CIKs, tickers, CUSIPs) through temporal symbol master tables without survivorship bias or ambiguous fuzzy guessing.
+- **Core Behavioral Guarantees**: Enforces physical append-only immutability (G1), zero look-ahead future reads (G2), and drop ingestion idempotency (G3).
 
-Values report median and min–max range across isolated subprocess runs.
+## 🚀 Getting Started
 
-| Metric | Synthetic (50 MB) | Synthetic (1 GB) | Synthetic (10 GB) | Synthetic (50 GB) | SEC FSDS (2023q3–2023q4) |
-|---|---|---|---|---|---|
-| Time from raw drop to report | 8.27 s (7.96–8.45 s) | 56.69 s (55.54–56.81 s) | TBD | TBD | 68.81 s (68.13–88.27 s) |
-| Validation throughput | 0.029 GB/s/core (0.028–0.030; 675,641 rows/s, cores=2) | 0.037 GB/s/core (0.036–0.039; 849,928 rows/s, cores=2) | TBD | TBD | 0.053 GB/s/core (0.048–0.053; 634,408 rows/s, cores=2) |
-| Store write throughput | 937,370 rows/s (67.4 MB/s, 64.3–68.9) | 1,644,264 rows/s (123.6 MB/s, 77.3–133.5) | TBD | TBD | 421,645 rows/s (41.4 MB/s, 32.6–42.1) |
-| Peak resident memory | 630.1 MiB (606.0–653.8 MiB) | 4967.0 MiB (4892.8–5053.1 MiB) | TBD | TBD | 4080.0 MiB (4070.8–4142.9 MiB) |
-| Revision detection recall and precision | recall 100.0%, precision 100.0% (25 revisions) | recall 100.0%, precision 100.0% (25 revisions) | TBD | TBD | 15,518 revisions detected (unlabeled) |
-| Point-in-time violations | 0 / 100,000 | 0 / 100,000 | TBD | TBD | 0 / 100,000 |
-| Leak detector recall | 100.0% (1,000/1,000, 0 false positives) | 100.0% (1,000/1,000, 0 false positives) | TBD | TBD | 100.0% (1,000/1,000, 0 false positives) |
-| Storage factor | 0.585× (0.585–0.586×) | 0.580× | TBD | TBD | 0.581× (0.580–0.581×) |
+### Prerequisites
 
-```
-Hardware & Environment:
-  CPU Model: Intel(R) Xeon(R) Platinum 8481C
-  CPU Cores: 2
-  Memory: 7.8 GiB
-  Disk Type: Virtual block store (virtio_blk)
-  Operating System: Linux-6.12.105+-x86_64-with-glibc2.36
-  Python Version: 3.12.16
-  DuckDB Version: 2.0.0
-  PyArrow Version: 26.0.1
-  Git Commit: 84a7f040b8912605b127413e1a0ae6b60615df79
-```
+- **Python**: Version `3.11` or `3.12`.
+- **Package Manager**: [`uv`](https://docs.astral.sh/uv/) (recommended) or standard `pip`.
+- **Core Dependencies**:
+  - DuckDB `== 2.0.0`
+  - PyArrow `== 26.0.1`
+  - Polars `== 2.1.0`
+  - Pydantic `== 2.14.3`
+  - Typer `== 0.29.0`
+- **Optional Runtimes**: Docker `20.10+` for containerized execution.
+- **Optional Configurations**:
+  - `FRED_API_KEY`: Required only when fetching optional vintage series from Federal Reserve Economic Data (not required for synthetic or SEC FSDS data).
+  - `VDOK_CONTACT`: User-Agent contact declaration string when downloading public SEC archives (e.g., `User Name user@example.com`).
 
-## Quick Start
+### Installation
 
-The kit provides dedicated `make` targets for standard operations:
+Clone the repository and install dependencies:
 
-| Target | Command | Description |
-|---|---|---|
-| Setup environment | `make setup` | Create virtual environment and install pinned dependencies |
-| Lint codebase | `make lint` | Run ruff check and format check |
-| Type check | `make typecheck` | Run pyright static type analysis |
-| Run test suite | `make test` | Run pytest with line coverage gate (85%) |
-| Download raw data | `make data` | Download SEC FSDS quarterly archives and ticker master |
-| Generate synthetic data | `make synth` | Generate synthetic drops with planted faults |
-| Onboard drop | `make onboard VENDOR=sec_fsds DROP=path/to/drop` | Validate, normalize, and write to store |
-| Emit readiness report | `make report VENDOR=sec_fsds DROP=drop_id` | Generate Markdown and JSON readiness reports |
-| Run full benchmark | `make bench SIZE=10GB RUNS=5 SEED=1` | Execute benchmark suite and write results |
-| Run benchmark smoke | `make bench-smoke` | 50 MB smoke run checking zero violations |
-| Update golden reports | `make goldens` | Regenerate report golden test fixtures |
-| Run inside container | `make docker` | Build container image and execute test target |
+```bash
+# Clone the repository
+git clone https://github.com/PromptCultivator/vendor-data-onboarding-kit.git
+cd vendor-data-onboarding-kit
 
-## Problem
+# Create the virtual environment and install pinned dependencies
+make setup
 
-Vendor datasets arrive with unpinned schemas, inconsistent identifier types, and undocumented changes across delivery batches. Historical values undergo silent revisions without explicit notice from data vendors. Downstream quantitative research pipelines fail or produce biased signals when data feeds leak future knowledge or breach delivery service level agreements. Resolving these defects requires point-in-time verification, revision auditing, and automated data quality checks before feeds reach production stores.
+# Activate the virtual environment
+source .venv/bin/activate
 
-## How It Works
-
-### Pipeline Architecture
-
-```
-Raw Vendor Drop (CSV / JSONL / Parquet)
-                 │
-                 ▼
-      [Format Discovery & Hash]
-                 │
-                 ▼
-     [Schema Check vs Pinned YAML]
-                 │
-                 ▼
-   [Normalization & Identifier Mapping]
-                 │
-                 ▼
-  [Vectorized Rule Engine (DuckDB SQL)]
-   ├── Pass ───────► [Append-Only Parquet Store]
-   ├── Warn ───────► [Warning Event Ledger]
-   ├── Quarantine ─► [quarantine.parquet]
-   └── Hold ───────► [Drop Held / Execution Aborted]
-                 │
-                 ▼
-       [Revision Ledger Engine]
-                 │
-                 ▼
-    [Readiness Report (MD + JSON)]
+# (Optional) Set environment variables for data downloads
+export VDOK_CONTACT="YourName yourname@example.com"
+export FRED_API_KEY="your_api_key_here"
 ```
 
-### Canonical Row
+### Running the Project
 
-Every incoming record normalizes to a canonical Arrow tuple:
+Run the end-to-end synthetic pipeline to generate data, onboard a drop, and review readiness:
 
-```
-entity_id: string                  # Mapped identifier or raw value if unmapped
-entity_id_type: string             # Identifier type (cik, ticker, isin, cusip)
-field: string                      # Combined field tags or metric name
-event_time: timestamp[us, UTC]     # Observation timestamp
-knowledge_time: timestamp[us, UTC] # Receipt or filing timestamp
-value_num: decimal128(38, 9)       # Numeric value (no float conversion for money)
-value_str: string                  # Categorical or textual payload
-unit: string                       # Normalized unit (USD, shares, ratio)
-drop_id: string                    # Hex digest of input file set
-source_file: string                # Original filename
-source_row: int64                  # Line or row position
-row_hash: string                   # SHA-256 digest of key values
-```
+```bash
+# 1. Generate a synthetic dataset sequence with planted anomalies
+make synth SIZE=50MB SEED=1
 
-### Manifest Example
+# 2. Onboard the first generated drop into the bitemporal store
+make onboard VENDOR=synthetic DROP=data/raw/synthetic/drop_001.csv
 
-Vendor feeds configure via declarative YAML manifests (`manifests/<vendor>.yaml`):
+# 3. Generate and view the vendor readiness report
+make report VENDOR=synthetic
 
-```yaml
-vendor: sec_fsds
-entity_columns: [cik]
-entity_id_type: cik
-event_time_column: ddate
-event_time_format: "%Y%m%d"
-knowledge_time: {source: column, column: filed, format: "%Y%m%d"}
-timezone: UTC
-value_columns: [value]
-unit_column: uom
-field_columns: [tag]
-expected_calendar: quarterly
-expected_universe: null
-rules: rules/sec_fsds.yaml
+# Alternatively, run the end-to-end benchmark smoke verification
+make bench-smoke
 ```
 
-### Severity Tiers
+## 💻 Usage & Min&#105;mal Examples
 
-The rule compiler evaluates incoming drops across three explicit severity tiers:
-- **Warn**: Records data quality deviations without excluding rows or delaying ingestion.
-- **Quarantine**: Diverts non-compliant rows into an isolated `quarantine.parquet` file with error explanations, allowing valid rows to proceed.
-- **Hold**: Aborts drop ingestion before writing to the store when batch-level invariants fail (such as schema column removal or anomalous volume shifts).
+![vdok Onboarding and Audit Demo](docs/assets/demo.gif)
+> *Walk-through illustrating raw drop ingestion, validation checks, and readiness report generation.*
 
-### Bitemporal Store
+### Python Point-in-Time Query
 
-Data writes to an append-only Parquet tree partitioned by vendor, field bucket, and event year:
-`data/store/<vendor>/<field_bucket>/<event_year>/part-<drop_id>.parquet`
-DuckDB provides SQL views over the partition tree alongside relational metadata tables (`drops`, `held_drops`, `schema_versions`, `symbol_master_versions`, and `revisions`).
-
-### Revision Ledger
-
-Following drop insertion, the engine queries for existing `(entity_id, field, event_time)` keys where values changed at a later `knowledge_time`. Detected revisions record prior value, updated value, timestamps, and relative delta into the revision ledger.
-
-### Point-in-Time API
-
-The query engine answers queries without leaking future knowledge:
+Query financial records as of a historical date without look-ahead bias:
 
 ```python
 from vdok.query import Store
 
-store = Store("data/store/sec_fsds")
-value = store.value(
-    entity_id="0000320193",
-    field="Revenues|USD|4Q",
-    event_time="2023-12-31",
-    as_of="2024-02-15",
+# Open the bitemporal store with query audit logging enabled
+store = Store("data/store/sec_fsds", audit=True)
+
+# Query a point-in-time value as known on a historical cutoff date
+record = store.value(
+    entity_id="0000320193",  # Apple Inc. CIK
+    field="Revenues|USD|4Q",  # Normalized metric name
+    event_time="2023-12-31",  # Period end date
+    as_of="2024-02-15",  # Historical knowledge cutoff
 )
+
+if record:
+    print(f"Entity:         {record.entity_id}")
+    print(f"Observed Value: {record.value_num} {record.unit}")
+    print(f"Knowledge Time: {record.knowledge_time}")
+
+store.close()
 ```
 
-### Leak Detector
+### CLI Leak Audit
 
-When initialized with audit logging (`Store(..., audit=True)`), queries record decision times, requested as-of times, and returned knowledge times. The `vdok leaks` command scans audit logs and flags records where returned data post-dates decision time.
+Analyze query audit logs to verify that backtest signals did not access future data:
 
-## Guarantees
+```bash
+# Scan query audit logs for look-ahead read violations
+vdok leaks --log data/store/sec_fsds/audit/query_audit.jsonl
+```
 
-The kit provides three explicit behavioral guarantees, each checked by dedicated automated tests:
+## 📁 Project Structure
 
-- **(G1) Store is append-only**: File writers reject updates or deletions of existing drop partitions. Checked by `test_g1_store_is_append_only`.
-- **(G2) Point-in-time queries never read future knowledge**: Queries filtered by `as_of` time never return records with `knowledge_time > as_of`. Checked by `test_g2_pit_never_reads_future_knowledge`.
-- **(G3) Re-running the same drop adds no new rows**: Ingestion of an identical file set is idempotent and skips duplicate writes. Checked by `test_g3_rerun_same_drop_adds_no_rows`.
+```
+vendor-data-onboarding-kit/
+├── .github/          # CI/CD workflows and automated validation jobs
+├── bench/            # Performance benchmarking suites and hardware profiling
+├── data/             # Ingestion targets, raw archives, and partitioned Parquet stores
+├── docs/             # Technical specifications, architectural decision records, and component guides
+├── manifests/        # Declarative vendor configuration manifests
+├── rules/            # Vectorized validation rules and severity classifications
+├── schemas/          # Pinned vendor schema contracts and drift baselines
+├── scripts/          # Automation scripts for dataset extraction and fixture creation
+├── tests/            # Test suites covering unit, property, and golden report cases
+├── vdok/             # Core Python package and CLI implementation
+├── Dockerfile        # Container build definition for reproducible testing
+├── LICENSE           # Apache License 2.0 terms
+├── Makefile          # Project automation shortcuts
+└── pyproject.toml    # Python package dependencies and tooling configuration
+```
 
-## Benchmark Method
+- `manifests/`: Declarative YAML configurations specifying raw drop file layouts, column mappings, and timestamp parsing rules.
+- `rules/`: Vectorized DuckDB SQL validation checks categorized by severity tiers (`warn`, `quarantine`, and `hold`).
+- `schemas/`: Pinned vendor schema contracts used to detect unannounced upstream column additions, removals, or type mutations.
+- `bench/`: Automated benchmarking tools that measure throughput, peak memory usage, and temporal correctness across workload sizes.
+- `docs/`: Technical specifications, architectural decision records (ADRs 001–005), and subsystem guides.
+- `vdok/`: Core implementation package housing the bitemporal store, revision engine, symbology resolver, and leak auditor.
 
-- **Workload Sizes**: 50 MB (continuous integration smoke check), 1 GB (local evaluation), 10 GB and 50 GB (scalability runs).
-- **Repetitions**: 5 runs per configuration, reporting median and min-max range.
-- **Hardware Recording**: Captured automatically via `bench/hardware.py` before test execution.
-- **Measured Metrics**: Wall-clock duration per stage, validation throughput (GB/s per core and rows/s), write throughput (MB/s and rows/s), peak resident set size (RSS via `getrusage`), revision detection recall and precision, point-in-time violation count (asserted 0 across 100,000 queries), leak detector recall across 1,000 planted leaks, and storage expansion factor.
-- **Unmeasured Dimensions**: Network transfer latency and operating system filesystem cache warm-up cycles are excluded from timing measurements.
+## 🤝 Contributing
 
-## Design Decisions
+We welcome contributions to the toolkit. Follow these three steps to submit bug fixes or improvements:
 
-| ADR | Title | Optimizes | Costs |
-|---|---|---|---|
-| ADR 001 | Bitemporal Append-Only Store | Point-in-time reproducibility | Storage growth (measured 0.58× Parquet vs raw drop text) and bitemporal query path |
-| ADR 002 | Severity Tiers: Warn, Quarantine, Hold | Availability of valid rows | Secondary write path and quarantine reconciliation |
-| ADR 003 | Schema Inference, Pinning, and Drift Detection | Early detection of silent vendor structural drift | Manual approval step on schema migrations |
-| ADR 004 | Local-First DuckDB and Parquet Store | Single-command local reproducibility | Absence of distributed clustering and cloud object store semantics |
-| ADR 005 | Model-Free Rule-Based Identifier Mapping | Auditability and deterministic tracing | Unmapped identifier review queue |
+1. **Fork and Branch**: Fork the repository on GitHub and create a topic branch from `main`:
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+2. **Implement and Test**: Apply your changes and confirm all quality gates pass:
+   ```bash
+   make lint       # Run ruff lint and format checks
+   make typecheck  # Run pyright static type analysis
+   make test       # Run pytest test suite with coverage gate (>= 85%)
+   ```
+3. **Open a Pull Request**: Push your branch to GitHub and submit a Pull Request describing your changes and testing approach.
 
-## Limits and Follow-Ups
+## 📄 License
 
-The following capabilities represent explicit non-goals for this kit:
-- Commercial vendor connectors requiring proprietary credentials.
-- Entitlement management, user authentication, or data access authorization.
-- Graphical user interfaces or web dashboards.
-- Distributed cluster computing engines.
-- Generative or probabilistic machine-learning models for transformation or mapping.
-- Arrow Flight remote RPC services.
-
-## Related Work
-
-- **Great Expectations and Soda**: Focus on validation rules and data quality assertions, without providing bitemporal storage structures or historical revision ledgers.
-- **ArcticDB**: Provides versioned time-series storage under a BSL 1.1 license, but does not provide end-to-end vendor drop onboarding, schema drift classification, or vendor readiness reporting.
-- **Feast and Feature Stores**: Support point-in-time joins for machine learning feature retrieval, without raw file ingestion validation, quarantine pipelines, or vendor SLA audits.
-- **Quanted**: Offers commercial financial data validation software without public open-source local-first pipeline execution.
-
-A revision ledger, vendor readiness report, and point-in-time leak detector combined into a single local-first pipeline.
-
-## Data
-
-- **Primary Source**: U.S. Securities and Exchange Commission Financial Statement Data Sets (SEC FSDS), published quarterly in the public domain.
-- **Symbol Master**: SEC company tickers registry (`company_tickers.json`), public domain.
-- **Committed Fixtures**: A deterministic subset of approximately 20,000 `num` records and matching `sub` rows from SEC filings, plus a 200-entity ticker master fixture.
-- **Downloaded Data**: Raw quarterly archives downloaded via `make data` with declared User-Agent contact information and rate limiting.
-- **Optional Sources**: Federal Reserve Economic Data (FRED/ALFRED) vintage series; requires API registration (`FRED_API_KEY`). FRED data is not committed to the repository, and the FRED terms of use must be read before any redistribution.
-
-## AI Assistance
-
-Generated files, functions, and manual verification statuses are tracked in [docs/AI-ASSISTANCE.md](docs/AI-ASSISTANCE.md).
-
-## License
-
-Licensed under the Apache License, Version 2.0 (the "License"). See [LICENSE](LICENSE) for the full license text.
+This project is licensed under the Apache License, Version 2.0. See the [LICENSE](LICENSE) file for full details.

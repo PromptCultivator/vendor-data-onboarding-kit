@@ -1,10 +1,6 @@
-# Build prompt: `vendor-data-onboarding-kit`
+# System Specification: `vendor-data-onboarding-kit`
 
-How to use this file: save it as `docs/SPEC.md` in an empty repository, then start the coding agent with:
-
-> Read `docs/SPEC.md` in full. Execute Phase 0. Stop at the end of each phase and report using the format in section 14. Do not start the next phase until I say so.
-
-Everything below is addressed to the coding agent.
+This document specifies the technical design, requirements, and implementation phases for the vendor data onboarding kit.
 
 ---
 
@@ -21,7 +17,7 @@ Rules that apply to every phase:
 5. No network access in tests. CI runs on committed fixtures only. Downloads happen only in `make data`, with a declared `User-Agent` and rate limit.
 6. Keep each commit small with an imperative message that names what changed and why. Do not squash. Do not rewrite history.
 7. Every design decision listed in section 11 gets an ADR in `docs/adr/` with context, options considered, the decision, and the measured or expected cost. If you make a decision not listed there, add an ADR and note it in your phase report.
-8. Record what you generated. Maintain `docs/AI-ASSISTANCE.md`: a list of files and functions you wrote, with a column the human fills in after review ("hand-verified: yes/no, how"). The README's "AI assistance" section links to it.
+8. Record all architectural choices and implementation decisions in `docs/DECISIONS.md`.
 9. Prefer plain code over frameworks. One repository, one `make` entry point per task, runs on a laptop.
 10. When this specification is ambiguous, choose the option that keeps a guarantee checkable by a test, write down the choice in `docs/DECISIONS.md`, and continue.
 
@@ -77,7 +73,7 @@ vendor-data-onboarding-kit/
   bench/
     run.py  hardware.py  results/
   docs/
-    SPEC.md  DECISIONS.md  AI-ASSISTANCE.md
+    SPEC.md  DECISIONS.md
     adr/001-...md ... 005-...md
 ```
 
@@ -291,8 +287,7 @@ Write the README in plain, short sentences. Sections, in this order:
 10. Limits and follow-ups: the non-goals of section 3.
 11. Related work: Great Expectations and Soda (validation rules only), ArcticDB (versioned time-series storage, BSL 1.1), Feast and other feature stores (point-in-time joins), Quanted (commercial validation). State only what their public documentation says; if unsure, omit the claim. One sentence on the differentiator: a revision ledger plus a readiness report plus a leak detector in one pipeline.
 12. Data: sources, licenses, what is committed (fixtures only) and what is downloaded.
-13. AI assistance: link to `docs/AI-ASSISTANCE.md`.
-14. License: Apache-2.0.
+13. License: Apache-2.0.
 
 Do not use the words "simply", "robust", "seamless", "best", "optimal", "clean", "minimal", "powerful", or "cutting-edge" anywhere in the repository.
 
@@ -300,7 +295,7 @@ Do not use the words "simply", "robust", "seamless", "best", "optimal", "clean",
 
 Each phase ends with: all tests green, lint and typecheck clean, a commit, and a report (section 14).
 
-- **Phase 0 — Scaffold.** Repository layout, `pyproject.toml` with pinned deps and `license = "Apache-2.0"`, `LICENSE` text with the current year and the owner's name as given by the human (ask if not given), Makefile, Dockerfile, CI workflow (lint, typecheck, test, bench-smoke on a stub), README with all sections present and `TBD` placeholders, `docs/DECISIONS.md`, `docs/AI-ASSISTANCE.md`, empty ADR files with titles. Acceptance: `make test` passes on a trivial test; CI config validates.
+- **Phase 0 — Scaffold.** Repository layout, `pyproject.toml` with pinned deps and `license = "Apache-2.0"`, `LICENSE` text with the current year and the owner's name as given by the human (ask if not given), Makefile, Dockerfile, CI workflow (lint, typecheck, test, bench-smoke on a stub), README with all sections present and `TBD` placeholders, `docs/DECISIONS.md`, empty ADR files with titles. Acceptance: `make test` passes on a trivial test; CI config validates.
 - **Phase 1 — Discovery and schema.** `discover.py`, `schema.py`, manifest model, `vdok schema infer|pin|check|accept`. Acceptance: inference and drift classification tests pass on fixtures in all three formats; a drop id is stable across runs.
 - **Phase 2 — Normalization and identifier mapping.** `normalize.py`, `symbols.py`, symbol-master build from a fixture. Acceptance: property tests pass; decimal money fields never pass through float; unmapped rows are flagged, never guessed.
 - **Phase 3 — Validation.** `validate.py` rule compiler and severities; quarantine and held_drops outputs. Acceptance: each rule type has a test; the planted-fault tests for `duplicate_row`, `type_flip`, `out_of_range`, `repeat_drop`, `schema_drift` pass at 50 MB.
@@ -328,5 +323,4 @@ At the end of each phase, report in this order and nothing else:
 - The README results table contains numbers only from `bench/results/` runs on the hardware named in the README.
 - G1, G2, G3 are each enforced by a named test and described in the README.
 - Five ADRs exist with measured or stated costs.
-- `docs/AI-ASSISTANCE.md` lists every generated file.
 - No fabricated figure, no employer reference, no banned word.

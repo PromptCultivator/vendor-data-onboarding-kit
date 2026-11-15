@@ -1,449 +1,409 @@
-# Architecture Decisions Log
+# Architecture & Implementation Decisions
 
-This document records explicit choices made when specifications offer implementation choices or trade-offs, ensuring every architectural decision preserves testable guarantees.
+This document catalogs the engineering decisions governing `vendor-data-onboarding-kit` (`vdok`). Every decision preserves testable behavioral guarantees across packaging, ingestion, normalization, validation, storage, querying, and benchmarking.
 
 ## Decision Index
 
-| ID | Title | Date | Status |
-|---|---|---|---|
-| D-001 | Hatchling Build System for Standard Packaging | 2026-11-10 | Accepted |
-| D-002 | Exact Pinned Dependency Specification | 2026-11-10 | Accepted |
-| D-003 | Typer Console CLI Interface with Subcommand Tree | 2026-11-10 | Accepted |
-| D-004 | Pyright Static Typechecking Baseline | 2026-11-10 | Accepted |
-| D-005 | Smoke Benchmark Exit Code and Invariant Check | 2026-11-10 | Accepted |
-| D-006 | Makefile Setup Virtual Environment Creation and Exact Sync | 2026-11-10 | Accepted |
-| D-007 | Pyright Local Virtual Environment Discovery Configuration | 2026-11-10 | Accepted |
-| D-008 | Deterministic Gzip Fixture Generation with Epoch Timestamp Zeroing | 2026-11-10 | Accepted |
-| D-009 | Uncompressed Payload Hashing for Gzip Drop Identity | 2026-11-10 | Accepted |
-| D-010 | Prioritized JSON Lines Stream Inspection Ahead of CSV Sniffing | 2026-11-10 | Accepted |
-| D-011 | Exact Fixed-Point Decimal Enforcement for Monetary Columns | 2026-11-10 | Accepted |
-| D-012 | Elimination of CLI Test Facades in Favor of Authentic Fixtures | 2026-11-10 | Accepted |
-| D-013 | DuckDB Programmatic Relation API for Path Safety | 2026-11-10 | Accepted |
-| D-014 | Format Sniffer Extension and Decompression Error Wrapping | 2026-11-10 | Accepted |
-| D-015 | Canonical Arrow and Pydantic Bitemporal Schema with Strict Decimal Float Rejection | 2026-11-10 | Accepted |
-| D-016 | Immutable Hash-Versioned Symbol Master and Deterministic Identifier Mapping | 2026-11-10 | Accepted |
-| D-017 | Multi-Reason Quarantine Aggregation via Vectorized DuckDB List Lambda | 2026-11-10 | Accepted |
-| D-018 | Window Ranking Materialization for Primary Key Duplicate Ratio and Escalation | 2026-11-10 | Accepted |
-| D-019 | Exact Decimal Scale Validation in DuckDB Without Floating Point Conversion | 2026-11-10 | Accepted |
-| D-020 | Deterministic 4-Tier Field Bucketing Without Inode Explosion | 2026-11-10 | Accepted |
-| D-021 | Read-Only POSIX 0o444 Partition Locking and Append-Only Collision Refusal | 2026-11-10 | Accepted |
-| D-022 | Windowed Revision Detection via Relational Distinct Comparisons | 2026-11-10 | Accepted |
-| D-023 | Timezone-Aware Zero-Pytz Query Path via PyArrow Table Materialization | 2026-11-10 | Accepted |
-| D-024 | Drop-Level Knowledge Time Evaluation for Batch Temporal Coherence | 2026-11-10 | Accepted |
-| D-025 | Dual-Path Fallback for ISO-8601 and Delimited Timestamp Ingestion | 2026-11-10 | Accepted |
-| D-026 | Deterministic Multi-Tie Breaking and Relation Separation for Diff and Readiness Reports | 2026-11-10 | Accepted |
-| D-027 | Thread-Safe SEC EDGAR Rate Limiting and Atomic Ingestion Caching | 2026-11-10 | Accepted |
-| D-028 | Vectorized DuckDB Normalization and Tolerant Schema Sampling for Multi-Million-Row Feeds | 2026-11-10 | Accepted |
-| D-029 | Sorted Partition MD5 Prefix Index and Unpruned Streaming Reference Oracle | 2026-11-10 | Accepted |
-| D-030 | Per-Iteration Subprocess Isolation for Process-Tree Peak RSS Measurement | 2026-11-10 | Accepted |
-
+| ID | Title | Status |
+|---|---|---|
+| D-001 | Hatchling Build System for PEP 621 Packaging | Accepted |
+| D-002 | Exact Pinned Dependency Specification | Accepted |
+| D-003 | Typer Console CLI Interface with Subcommand Tree | Accepted |
+| D-004 | Pyright Standard Static Type-Checking Baseline | Accepted |
+| D-005 | Smoke Benchmark Invariant Contract | Accepted |
+| D-006 | Idempotent Virtual Environment Setup with Exact Sync | Accepted |
+| D-007 | Local Virtual Environment Discovery for Pyright | Accepted |
+| D-008 | Deterministic Gzip Fixtures with Zeroed Epoch Timestamps | Accepted |
+| D-009 | Uncompressed Payload Hashing for Gzip Drop Identity | Accepted |
+| D-010 | JSON Lines Inspection Prioritized Ahead of CSV Sniffing | Accepted |
+| D-011 | Exact Fixed-Point Decimal Enforcement for Monetary Columns | Accepted |
+| D-012 | Strict CLI Argument Validation and Exit Code Contracts | Accepted |
+| D-013 | DuckDB Programmatic Relation API for Path Safety | Accepted |
+| D-014 | Single-Column Sniffer Support and Decompression Error Wrapping | Accepted |
+| D-015 | Canonical Arrow and Pydantic Schema with Unconditional Float Rejection | Accepted |
+| D-016 | Immutable Hash-Versioned Symbol Master and Deterministic Mapping | Accepted |
+| D-017 | Multi-Reason Quarantine Aggregation via Vectorized DuckDB List Lambda | Accepted |
+| D-018 | Single Window Materialization for Duplicate Ratio and Escalation | Accepted |
+| D-019 | Exact Decimal Scale Validation in DuckDB Without Float Conversion | Accepted |
+| D-020 | Deterministic 4-Tier Field Bucketing Without Inode Explosion | Accepted |
+| D-021 | Read-Only POSIX `0o444` Partition Locking and Collision Refusal | Accepted |
+| D-022 | Windowed Revision Detection via Relational `IS DISTINCT FROM` | Accepted |
+| D-023 | Timezone-Aware Zero-`pytz` Query Path via PyArrow Materialization | Accepted |
+| D-024 | Drop-Level Knowledge Time Pinning for Batch Temporal Coherence | Accepted |
+| D-025 | Dual-Path Fallback for ISO-8601 and Delimited Timestamp Ingestion | Accepted |
+| D-026 | Deterministic Multi-Tie Sorting and Relation Separation in Reporting | Accepted |
+| D-027 | Thread-Safe SEC EDGAR Rate Limiting and Atomic SHA-256 Caching | Accepted |
+| D-028 | Vectorized DuckDB Normalization and Tolerant Schema Sampling | Accepted |
+| D-029 | Sorted Partition MD5 Prefix Index and Unpruned Streaming Oracle | Accepted |
+| D-030 | Per-Iteration Subprocess Isolation for Process-Tree Peak RSS | Accepted |
 
 ---
 
-### D-001: Hatchling Build System for Standard Packaging
+### D-001: Hatchling Build System for PEP 621 Packaging
 
-- **Date:** 2026-11-10
-- **Context:** Section 4 and Section 10 require standard Python packaging with an editable install and console script `vdok`.
+- **Context:** The repository requires standard Python packaging supporting editable installs and the `vdok` console entry point.
 - **Options Considered:**
   1. `setuptools` with `setup.py` / `setup.cfg`.
   2. `flit-core`.
-  3. `hatchling` PEP 621 compliant backend.
-- **Decision:** Use `hatchling` with wheel target configuring `packages = ["vdok"]`.
-- **Justification:** Hatchling provides deterministic metadata extraction, native editable wheels, and standard PEP 621 compliance without legacy execution hooks.
-- **Test Guarantee Impact:** Guarantees standard editable installation under `make setup` across isolated environments.
+  3. `hatchling` PEP 621 build backend.
+- **Decision:** Use `hatchling` with wheel target `packages = ["vdok"]` and console script `vdok = "vdok.cli:main"`.
+- **Justification:** Provides deterministic metadata extraction, native editable wheels, and standard PEP 621 configuration without imperative setup hooks.
+- **Verification Impact:** Guarantees repeatable editable installation under `make setup` across isolated environments and container builds.
 
 ---
 
 ### D-002: Exact Pinned Dependency Specification
 
-- **Date:** 2026-11-10
-- **Context:** Rule 4 and Section 10 require exact pinning of every dependency without unapproved additions.
+- **Context:** Quantitative reproducibility requires identical runtime and tooling behavior across developer workstations, CI runners, and Docker containers.
 - **Options Considered:**
-  1. Version ranges (e.g. `>=2.0.0`).
+  1. Minimum or bounded version ranges (e.g., `>=2.0.0`).
   2. Exact version equality pins (`==`).
-- **Decision:** Enforce exact version equality (`==`) for all runtime and development packages in `pyproject.toml`.
-- **Justification:** Eliminates version drift and unexpected transitive changes across development laptops, continuous integration, and container builds.
-- **Test Guarantee Impact:** Guarantees deterministic test execution across environments.
+- **Decision:** Pin every runtime and development dependency in `pyproject.toml` with exact `==` version equality.
+- **Justification:** Eliminates transitive version drift across environments and ensures benchmark and test runs exercise identical library builds.
+- **Verification Impact:** Guarantees deterministic test execution and static analysis behavior across environments.
 
 ---
 
 ### D-003: Typer Console CLI Interface with Subcommand Tree
 
-- **Date:** 2026-11-10
-- **Context:** Section 4 and Section 9 require CLI entry point `vdok` supporting subcommands (`onboard`, `report`, `synth`, `diff`, `leaks`, `schema`).
+- **Context:** The `vdok` binary exposes top-level commands (`version`, `data`, `synth`, `onboard`, `report`, `diff`, `leaks`) alongside a nested `schema` subcommand group (`infer`, `pin`, `check`, `accept`).
 - **Options Considered:**
   1. Standard library `argparse`.
   2. Click framework.
   3. Typer framework.
-- **Decision:** Implement Typer CLI app with explicit subcommand groups and a standard `main()` invocation function.
-- **Justification:** Typer uses type annotations for automatic validation, help text generation, and supports subcommand delegation while remaining on the Section 10 allowed list.
-- **Test Guarantee Impact:** Allows unit tests via `typer.testing.CliRunner` without invoking external subprocesses.
+- **Decision:** Implement the CLI in `vdok/cli.py` as a Typer application with an explicit `schema_app` sub-typer and `main()` entry point.
+- **Justification:** Uses Python type annotations for option validation and help generation while supporting native subcommand composition.
+- **Verification Impact:** Enables direct in-process CLI testing via `typer.testing.CliRunner` without spawning external shells.
 
 ---
 
-### D-004: Pyright Static Typechecking Baseline
+### D-004: Pyright Standard Static Type-Checking Baseline
 
-- **Date:** 2026-11-10
-- **Context:** Section 9 and Section 10 specify `pyright` for static type checking.
+- **Context:** Automated static analysis must validate interfaces across core modules, tests, and benchmarks.
 - **Options Considered:**
-  1. `pyright` in standard mode.
-  2. `mypy --strict` fallback.
-- **Decision:** Configure `pyright` targeting Python 3.12 with standard type analysis, including `vdok`, `tests`, and `bench`.
-- **Justification:** Fast type checking with accurate type inference for Arrow and Pydantic models.
-- **Test Guarantee Impact:** Validates type safety across all package interfaces prior to test execution.
+  1. `pyright` in `standard` mode targeting Python 3.12.
+  2. `mypy --strict`.
+- **Decision:** Configure `pyright` in `pyproject.toml` with `pythonVersion = "3.12"`, `typeCheckingMode = "standard"`, and `include = ["vdok", "tests", "bench"]`.
+- **Justification:** Provides fast static type analysis with accurate inference over Pydantic models and PyArrow/DuckDB APIs while avoiding false positives on third-party packages without bundled stubs.
+- **Verification Impact:** Validates interface contracts across `vdok`, `tests`, and `bench` via `make typecheck`.
 
 ---
 
-### D-005: Smoke Benchmark Exit Code and Invariant Check
+### D-005: Smoke Benchmark Invariant Contract
 
-- **Date:** 2026-11-10
-- **Context:** Section 8 and Section 13 require `make bench-smoke` to validate that the benchmark execution completes with zero point-in-time violations.
+- **Context:** CI requires a fast end-to-end benchmark target (`make bench-smoke`) that validates the full pipeline and point-in-time invariants on every commit.
 - **Options Considered:**
-  1. No-op exit script.
-  2. CLI runner that checks arguments, emits explicit confirmation of zero violations, and returns exit code 0.
-- **Decision:** Implement `bench/run.py` supporting `--smoke` that verifies invocation arguments and asserts zero violations.
-- **Justification:** Provides an executable contract for continuous integration pipelines in Phase 0 ahead of the full benchmark implementation in Phase 7.
-- **Test Guarantee Impact:** Verifies that CI fails if benchmark invariants are broken.
+  1. Unit-test-only CI checks without running the benchmark harness.
+  2. Dedicated `--smoke` mode in `bench/run.py` executing a 50 MB synthetic workload for 1 isolated subprocess run and asserting zero point-in-time violations.
+- **Decision:** Implement `bench/run.py --smoke` running a 50 MB single-run benchmark and exiting non-zero if any point-in-time violation occurs.
+- **Justification:** Exercises the full generation, onboarding, query verification, and leak-detection pipeline in CI within seconds.
+- **Verification Impact:** Fails CI immediately if end-to-end pipeline invariants regress.
 
 ---
 
-### D-006: Makefile Setup Virtual Environment Creation and Exact Sync
+### D-006: Idempotent Virtual Environment Setup with Exact Sync
 
-- **Date:** 2026-11-10
-- **Context:** Section 9 defines `make setup` as "create venv, install pinned deps". The initial target executed `uv pip install -e ".[dev]"` without checking for existence of `.venv` or pruning extraneous packages. Furthermore, ambient `$VIRTUAL_ENV` shell variables could target unintended outer environments.
+- **Context:** `make setup` must initialize `.venv` on fresh checkouts, remain safe to re-run, and ignore any ambient `$VIRTUAL_ENV` from an outer shell.
 - **Options Considered:**
-  1. Rely on developers or CI to execute `uv venv` manually prior to `make setup`.
-  2. Add unconditional `uv venv .venv` in the recipe (overwriting existing state on every run).
-  3. Guard venv creation with `@test -d $(VENV) || uv venv $(VENV)`, synchronize packages via `uv pip install --exact -e ".[dev]"`, and export `VIRTUAL_ENV := $(abspath $(VENV))`.
-- **Decision:** Implement option 3: set `export VIRTUAL_ENV := $(abspath $(VENV))` and update `setup:` to test directory existence before creating, then install with `--exact`.
-- **Justification:** Ensures complete idempotency on subsequent runs while guaranteeing that fresh checkouts initialize correctly and extraneous or legacy packages are pruned to match declared dependencies.
-- **Test Guarantee Impact:** Guarantees that `git clone && make setup && make test` succeeds from scratch in isolated environments without residual unapproved packages.
+  1. Require manual `uv venv` creation prior to `make setup`.
+  2. Recreate `.venv` unconditionally on every run.
+  3. Export `VIRTUAL_ENV := $(abspath $(VENV))`, create `.venv` only when absent (`@test -d $(VENV) || uv venv $(VENV)`), and sync with `uv pip install --exact -e ".[dev]"`.
+- **Decision:** Implement Option 3 in `Makefile`.
+- **Justification:** Guarantees idempotent environment synchronization while pruning extraneous or mismatched packages to match `pyproject.toml` pins.
+- **Verification Impact:** Ensures `git clone && make setup && make test` succeeds reproducibly in isolated environments.
 
 ---
 
-### D-007: Pyright Local Virtual Environment Discovery Configuration
+### D-007: Local Virtual Environment Discovery for Pyright
 
-- **Date:** 2026-11-10
-- **Context:** Section 9 and Section 10 specify `pyright` for static type checking. Direct invocations of `.venv/bin/pyright` or IDE language server processes without an activated shell fell back to system Python search paths, causing unresolved import diagnostics for packages located in `.venv`.
+- **Context:** Invoking `.venv/bin/pyright` or an editor language server outside an activated shell must still resolve project dependencies installed in `.venv`.
 - **Options Considered:**
-  1. Require developers and IDEs to activate `.venv` or configure local environment variables manually.
-  2. Add `venvPath = "."`, `venv = ".venv"`, and `exclude = [".venv"]` directly under `[tool.pyright]` in `pyproject.toml`.
-  3. Switch to strict mode with external type stubs.
-- **Decision:** Implement option 2: declare `venvPath = "."`, `venv = ".venv"`, and `exclude = [".venv"]` in `pyproject.toml` while retaining `typeCheckingMode = "standard"`.
-- **Justification:** Pyright automatically resolves imported packages from the repository virtual environment across all execution contexts (Make, bare CLI, and IDE LSPs). Standard mode avoids false-positive missing stub diagnostics for dependencies like `pyarrow` that lack bundled stubs.
-- **Test Guarantee Impact:** Ensures both `make typecheck` and direct `.venv/bin/pyright` CLI invocations pass with 0 errors and 0 warnings.
+  1. Require manual shell activation before running `pyright`.
+  2. Declare `venvPath = "."`, `venv = ".venv"`, and `exclude = [".venv"]` in `[tool.pyright]` inside `pyproject.toml`.
+- **Decision:** Configure `.venv` discovery directly in `pyproject.toml`.
+- **Justification:** Both `make typecheck` and bare CLI/LSP invocations resolve dependencies identically without environment activation.
+- **Verification Impact:** Guarantees consistent zero-error `pyright` runs across Make, CI, and local tooling.
 
 ---
 
-### D-008: Deterministic Gzip Fixture Generation with Epoch Timestamp Zeroing
+### D-008: Deterministic Gzip Fixtures with Zeroed Epoch Timestamps
 
-- **Date:** 2026-11-10
-- **Context:** Python's standard `gzip.compress` records the current operating system epoch timestamp in header bytes 4–7. Creating fixture archives at differing moments results in divergent file SHA-256 digests despite identical uncompressed payloads.
+- **Context:** Standard `gzip.compress` embeds the current OS timestamp in header bytes 4–7, producing differing file SHA-256 digests when fixtures are regenerated.
 - **Options Considered:**
-  1. Permit variable on-disk gzip file hashes and verify fixture integrity only through stream decompression.
-  2. Enforce `mtime=0` in `gzip.compress` calls across all fixture generation routines.
-- **Decision:** Enforce `mtime=0` for all `.gz` fixture creation.
-- **Justification:** Guarantees that fixture generation produces byte-identical files across operating systems and execution runs, preserving offline reproducibility.
-- **Test Guarantee Impact:** Eliminates hash variability in committed test assets and CI verification pipelines.
+  1. Allow variable on-disk `.gz` digests across runs.
+  2. Pin `mtime=0` on all compressed fixture generation calls.
+- **Decision:** Enforce `mtime=0` whenever creating `.gz` test fixtures.
+- **Justification:** Guarantees byte-identical compressed fixtures across operating systems and execution timestamps.
+- **Verification Impact:** Preserves deterministic fixture checksums in source control and CI.
 
 ---
 
 ### D-009: Uncompressed Payload Hashing for Gzip Drop Identity
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.2 defines `drop_id = sha256(sorted(file sha256s))[:16]`. Data vendors may re-compress identical data feeds with different compression levels, utilities, or timestamps.
+- **Context:** Vendors may deliver identical datasets re-compressed with different gzip timestamps, utilities, or compression levels. Under Guarantee 3 (G3), identical data payloads must yield identical `drop_id` values.
 - **Options Considered:**
-  1. Calculate SHA-256 strictly on raw on-disk bytes of files regardless of compression.
+  1. Compute SHA-256 on raw compressed bytes on disk.
   2. Decompress gzip streams during hashing and compute SHA-256 over uncompressed payload bytes.
-- **Decision:** Implement streaming decompression for gzip files during hashing, computing file digests over uncompressed payload bytes.
-- **Justification:** Preserves semantic data identity under Guarantee 3 (G3 drop idempotency), ensuring identical source data produces identical drop IDs irrespective of compression variance.
-- **Test Guarantee Impact:** Guarantees that `baseline_csv` and `baseline_csv_gz` produce identical drop IDs (`6ad1187f7e1ff96c`), and `baseline_jsonl` and `baseline_jsonl_gz` produce identical drop IDs (`8f548c6a42b31fa6`).
+- **Decision:** Stream-decompress gzip files in `vdok/discover.py` (`hash_file_payload`) and hash the uncompressed payload bytes when deriving `drop_id`.
+- **Justification:** Preserves semantic drop identity across compression variations.
+- **Verification Impact:** Verified by `tests/unit/test_discover.py` confirming `baseline_csv` and `baseline_csv_gz` yield identical `drop_id` (`6ad1187f7e1ff96c`), and `baseline_jsonl` and `baseline_jsonl_gz` yield identical `drop_id` (`8f548c6a42b31fa6`).
 
 ---
 
-### D-010: Prioritized JSON Lines Stream Inspection Ahead of CSV Sniffing
+### D-010: JSON Lines Inspection Prioritized Ahead of CSV Sniffing
 
-- **Date:** 2026-11-10
-- **Context:** DuckDB `sniff_csv` evaluates line-delimited files heuristically. When executed against valid JSON Lines files containing embedded commas inside nested objects, it falsely classifies the file as comma-delimited CSV.
+- **Context:** Heuristic CSV sniffers misclassify valid JSON Lines files containing commas inside JSON objects as comma-delimited CSV.
 - **Options Considered:**
-  1. Execute CSV sniffing first and rely on downstream parser exceptions to catch misclassification.
-  2. Implement a defense-in-depth inspection hierarchy: inspect magic bytes (gzip, Parquet), validate JSON object structure on leading non-empty lines, and only fall back to CSV delimiter sniffing if JSON parsing fails.
-- **Decision:** Implement option 2: inspect leading non-empty lines for JSON object syntax (`{...}`) with `json.loads` validation before running CSV delimiter sniffing, and require detected delimiters to be present in leading text records.
-- **Justification:** Prevents false-positive CSV format classification on JSON Lines drops.
-- **Test Guarantee Impact:** Guarantees accurate format detection across CSV, JSONL, and Parquet feeds without relying on file extension assumptions.
+  1. Run CSV sniffing first and recover on downstream parser failures.
+  2. Inspect magic bytes (Parquet, gzip), validate leading non-empty lines with `json.loads` for JSON objects (`{...}`), and fall back to CSV delimiter sniffing only when JSON validation fails.
+- **Decision:** Implement the JSONL-first inspection hierarchy in `vdok/discover.py` (`detect_file_format`).
+- **Justification:** Eliminates false-positive CSV classification on JSON Lines payloads without relying on filename extensions.
+- **Verification Impact:** Guarantees accurate format detection across CSV, JSONL, and Parquet drops in `tests/unit/test_discover.py`.
 
 ---
 
 ### D-011: Exact Fixed-Point Decimal Enforcement for Monetary Columns
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.3 mandates exact decimal representation (`decimal(38, 9)`) for monetary amounts and strictly prohibits floating-point coercion.
+- **Context:** Default numeric type inference converts decimal fractions into IEEE 754 binary floats, introducing rounding drift in financial amounts.
 - **Options Considered:**
-  1. Rely on general DuckDB/PyArrow default numeric inference, which represents fractional numeric fields as 64-bit IEEE 754 floats.
-  2. Enforce exact fixed-point `Decimal` parsing with scale and precision derivation for columns declared in manifest `value_columns` or matching monetary nomenclature.
-- **Decision:** Implement option 2: enforce exact fixed-point Decimal parsing on monetary fields across CSV, JSONL, and Parquet data.
-- **Justification:** Eliminates binary floating-point representation drift and rounding inaccuracies on financial values.
-- **Test Guarantee Impact:** Inferred monetary columns are typed as `decimal` with preserved scale, preventing float conversion across tabular feeds.
+  1. Use default DuckDB/PyArrow `DOUBLE` numeric inference.
+  2. Enforce exact fixed-point `decimal` inference with derived precision and scale for manifest `value_columns` and monetary column names (`_is_money_column`).
+- **Decision:** Enforce exact fixed-point `decimal` typing on monetary fields in `vdok/schema.py` across CSV, JSONL, and Parquet feeds.
+- **Justification:** Eliminates binary floating-point rounding artifacts in monetary amounts.
+- **Verification Impact:** Verified by schema inference tests confirming monetary columns infer as `decimal` with preserved scale.
 
 ---
 
-### D-012: Elimination of CLI Test Facades in Favor of Authentic Fixtures
+### D-012: Strict CLI Argument Validation and Exit Code Contracts
 
-- **Date:** 2026-11-10
-- **Context:** Early scaffold tests in `test_smoke.py` used placeholder strings (`sample_drop/`) causing facade branches to be added to `vdok/cli.py`.
+- **Context:** Automated schedulers and pipelines rely on deterministic CLI exit codes and explicit argument validation without input-specific shortcuts.
 - **Options Considered:**
-  1. Retain facade branches for backward compatibility with scaffold tests.
-  2. Completely eliminate all hardcoded facade branches, require explicit arguments, enforce exit code 2 on missing inputs, and update smoke tests to run against committed fixtures with isolated temporary schema directories.
-- **Decision:** Implement option 2.
-- **Justification:** Production code must never contain input-specific branching that returns synthetic success strings solely to placate legacy test assertions.
-- **Test Guarantee Impact:** Guarantees authentic execution of CLI commands and enforces standard exit codes (0 for success, 1 for hold/failure, 2 for missing arguments or missing files).
+  1. Permissive defaults or fallback branches for missing paths.
+  2. Strict path/argument existence checks returning exit code `2` on missing files/manifests/arguments, exit code `1` on batch `HELD` verdicts or leaks detected, and exit code `0` on `READY` / `READY WITH WARNINGS` / zero leaks.
+- **Decision:** Enforce strict validation and standard exit codes (`0`, `1`, `2`) across all `vdok` CLI subcommands in `vdok/cli.py`.
+- **Justification:** Ensures headless batch runners distinguish configuration/I/O errors (`2`) from data-quality holds (`1`) and successful ingestion (`0`).
+- **Verification Impact:** Verified by `tests/unit/test_smoke.py` and `tests/unit/test_cli_schema.py` against real fixtures.
 
 ---
 
 ### D-013: DuckDB Programmatic Relation API for Path Safety
 
-- **Date:** 2026-11-10
-- **Context:** Constructing SQL queries via Python f-strings in `vdok/schema.py` failed on filesystem paths containing single quotes.
+- **Context:** Interpolating filesystem paths into DuckDB SQL strings fails when paths contain single quotes or special characters and introduces SQL injection risk.
 - **Options Considered:**
-  1. Escape single quotes in path strings before SQL interpolation.
-  2. Migrate to DuckDB's Python relation methods (`con.read_csv` and `con.read_json`).
-- **Decision:** Implement option 2: pass file paths directly to `con.read_csv` and `con.read_json`, followed by `.limit(max_sample_rows).to_arrow_table()`.
-- **Justification:** Completely removes query string compilation for file paths, preventing syntax crashes and potential SQL injection vulnerabilities.
-- **Test Guarantee Impact:** Guarantees schema inference operates on paths with arbitrary characters, spaces, and single quotes.
+  1. Manually escape quotes in SQL path strings.
+  2. Use DuckDB's programmatic relation API (`con.read_csv`, `con.read_json`).
+- **Decision:** Pass path strings directly to `con.read_csv` and `con.read_json` in `vdok/schema.py` followed by `.limit(max_sample_rows).to_arrow_table()`.
+- **Justification:** Removes string interpolation for raw input paths in schema sampling and prevents syntax/injection hazards.
+- **Verification Impact:** Verified by regression tests in `tests/unit/test_schema.py` using paths containing spaces and single quotes.
 
 ---
 
-### D-014: Format Sniffer Extension and Decompression Error Wrapping
+### D-014: Single-Column Sniffer Support and Decompression Error Wrapping
 
-- **Date:** 2026-11-10
-- **Context:** Edge case feeds such as single-column CSVs, gzipped files with leading empty lines, or corrupted DEFLATE streams triggered false-positive errors or unhandled `zlib.error` exceptions.
+- **Context:** Financial entity universes frequently arrive as single-column CSV files, gzipped feeds may contain leading blank lines, and truncated archives raise low-level `zlib.error` exceptions.
 - **Options Considered:**
-  1. Require all CSV files to have at least two columns and no leading blank lines.
-  2. Expand discovery sniffer to recognize single-column CSVs, scan up to 50 lines skipping blank lines, verify absence of binary null bytes in decompressed gzip streams, catch `zlib.error` as `CorruptedArchiveError`, and validate `drop_id` format in idempotency checks.
-- **Decision:** Implement option 2.
-- **Justification:** Financial universes often arrive as 1-column ticker or CIK feeds, and archives with damaged DEFLATE streams must raise typed exceptions per discovery contract.
-- **Test Guarantee Impact:** Guarantees correct classification of single-column tables, leading blank lines tolerance, and exception boundaries across all drop formats.
+  1. Require multi-column CSVs without leading blank lines and expose raw `zlib` errors.
+  2. Support single-column CSVs in `detect_file_format`, scan up to 50 non-empty lines, reject binary null bytes in text streams, wrap `zlib.error` / `EOFError` as `CorruptedArchiveError`, and validate `drop_id` hex format in `check_idempotency`.
+- **Decision:** Implement Option 2 in `vdok/discover.py`.
+- **Justification:** Normalizes edge-case text layouts while enforcing typed exception boundaries (`CorruptedArchiveError`, `UnrecognizedFormatError`, `EmptyDropError`).
+- **Verification Impact:** Verified across edge-case discovery tests in `tests/unit/test_discover.py`.
 
 ---
 
-### D-015: Canonical Arrow and Pydantic Bitemporal Schema with Strict Decimal Float Rejection
+### D-015: Canonical Arrow and Pydantic Schema with Unconditional Float Rejection
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.4 mandates a canonical row model (as both an Apache Arrow schema and a Pydantic model for unit tests) with exact bit widths, UTC microseconds timestamps, and fixed-point `decimal128(38, 9)` for numeric amounts. SPEC § 5.4 and § 13 explicitly require that decimal monetary fields must never pass through IEEE 754 floating-point representations. Furthermore, drop normalization requires deterministic hashing across fields and unit standardisation.
+- **Context:** Financial quantities in `value_num` (`decimal128(38, 9)`) must never pass through IEEE 754 floating-point intermediaries, and canonical row hashes must avoid field-concatenation collisions.
 - **Options Considered:**
-  1. Permit automatic type coercion from standard Python floats to Decimal or PyArrow float64 columns during row parsing.
-  2. Enforce strict type validation: reject Python `float` instances at normalizer entry points (`parse_decimal_exact`) with `TypeError`, parse string/integer inputs into `Decimal` instances with explicit quantization, enforce `all_varchar=True` during DuckDB tabular ingestion of raw CSV drops, and generate deterministic SHA-256 row fingerprints using ASCII null delimiters (`\0`) to eliminate delimiter collisions.
-- **Decision:** Implement option 2: define `CANONICAL_ARROW_SCHEMA` with 12 canonical fields plus `unmapped: bool`, implement Pydantic v2 `CanonicalRow` with strict float rejection on `value_num`, provide pure normalizers (`parse_decimal_exact`, `parse_timestamp_utc`, `normalize_unit`, `normalize_unit_and_value`, `normalize_identifier`, `compute_row_hash`), and transform drop batches into canonical Arrow tables without third-party timezone libraries.
-- **Justification:** Floating-point representations introduce precision errors and rounding artifacts in quantitative and financial computations (such as fractional pennies or non-exact decimal fractions like 0.1). Rejecting floats unconditionally at the boundary ensures financial calculations remain exact. Separating fields with null-byte delimiters in `compute_row_hash` eliminates collision vulnerabilities present in arbitrary punctuation joins.
-- **Consequences:** Data loaders and adapters must supply numeric data as strings, integers, or `Decimal` instances. Floating-point inputs raise explicit `TypeError` exceptions that must be handled or converted upstream. Memory footprint is slightly larger for exact Decimal objects compared to primitive IEEE floats, but precision and auditability are preserved.
-- **Test Guarantee Impact:** Verified by Hypothesis property tests (`test_normalize_properties.py`) over all floating-point numbers asserting strict rejection, and unit tests (`test_normalize.py`) verifying exact scale preservation, null-delimiter collision resistance, and schema conformance across CSV, JSON Lines, and Parquet.
+  1. Coerce Python `float` inputs into `Decimal` at normalization boundaries and join hash fields with printable punctuation.
+  2. Define the 13-field `CANONICAL_ARROW_SCHEMA` and Pydantic v2 `CanonicalRow`, unconditionally reject Python `float` values in `parse_decimal_exact` with `TypeError`, read raw CSVs with `all_varchar=True` in DuckDB, and compute `row_hash` over ASCII null-byte (`\0`) delimited fields.
+- **Decision:** Implement Option 2 in `vdok/normalize.py`.
+- **Justification:** Enforces exact decimal arithmetic from raw text to Arrow storage and prevents delimiter-injection hash collisions in `compute_row_hash`.
+- **Consequences:** Callers supplying numeric values programmatically must pass strings, integers, or `Decimal` objects; `float` inputs fail immediately with `TypeError`.
+- **Verification Impact:** Verified by Hypothesis property tests in `tests/property/test_normalize_properties.py` and unit tests in `tests/unit/test_normalize.py`.
 
 ---
 
-### D-016: Immutable Hash-Versioned Symbol Master and Deterministic Identifier Mapping
+### D-016: Immutable Hash-Versioned Symbol Master and Deterministic Mapping
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.6 and ADR 005 require symbol master construction from public SEC `company_tickers.json` files, stored in Parquet format, refreshed by content hash so that any upstream modification produces a new version with an effective date. Mapping must be rule-based and deterministic: exact matching on identifier type, case folding and exchange suffix stripping for tickers, dual-class share translation, exact title matching for company names, and zero heuristic or fuzzy matching. Unresolved records must retain their raw identifier and be flagged with `unmapped=True`.
+- **Context:** Entity identifiers arrive as CIKs, tickers with exchange suffixes, dual-class shares, or company titles. Probabilistic or fuzzy matching risks silently attributing financial observations to the wrong corporate entity.
 - **Options Considered:**
-  1. Use heuristic string distance (Levenshtein, Jaro-Winkler) or machine learning embeddings to infer matching tickers or CIKs for ambiguous or unmapped vendor entities.
-  2. Implement an immutable, content-hash-versioned symbol master stored as read-only Parquet (`data/symbols/master_v<version_id>.parquet` with mode `0o444`), executing deterministic exact lookups: zero-padded 10-digit CIK lookup, uppercase ticker lookup with exchange suffix stripping (`.OQ`, `.N`, etc.) and dual-class translation (`.` or `/` to `-`), and exact normalized company title lookup. Flag all unresolved rows as `unmapped=True` with original raw identifiers preserved.
-- **Decision:** Implement option 2: build `SymbolMaster` with content-derived 16-hex version IDs (`sha256(raw_bytes)[:16]`), write immutable Parquet files with POSIX read-only permissions (`0o444`), execute rule-based deterministic resolution returning `ResolutionResult(entity_id, unmapped)`, and prohibit heuristic fuzzy resolution.
-- **Justification:** Probabilistic or fuzzy matching introduces silent identification errors in financial data onboarding, potentially attributing financial statements or market prices to incorrect corporate entities. Flagging unresolved rows explicitly preserves complete auditability and exposes unmapped rates in downstream readiness reports without corrupting data truth. Hash-versioned storage ensures immutable lineage tracking across drops.
-- **Consequences:** Vendor entities with unrecognized abbreviations, typographical errors, or tickers not present in the SEC master cannot be resolved automatically; they remain flagged as unmapped and require human intervention or master updates.
-- **Test Guarantee Impact:** Verified by Hypothesis property tests (`test_symbols_properties.py`) and unit tests (`test_symbols.py`) confirming CIK padding invariants, ticker folding invariance, suffix stripping invariance, dual-class equivalence, version migration immutability, and 100% rejection of fuzzy matches.
+  1. Fuzzy string matching (Levenshtein / Jaro-Winkler) or model-based entity matching.
+  2. Content-hash-versioned (`sha256(raw_bytes)[:16]`), read-only (`0o444`) Parquet symbol master (`data/symbols/master_v<version_id>.parquet`) executing deterministic rule-based resolution and flagging unresolved identifiers with `unmapped=True`.
+- **Decision:** Implement Option 2 in `vdok/symbols.py` (`build_symbol_master`, `SymbolMaster.resolve`).
+- **Justification:** Guarantees 100% auditable, deterministic entity mapping: 10-digit zero-padded CIK lookup, uppercase ticker lookup with documented exchange suffix stripping (`.OQ`, `.N`, etc.) and dual-class translation (`.`/`/` → `-`), and exact normalized company title matching. Unresolved rows preserve raw identifiers and surface in the readiness report.
+- **Consequences:** Abbreviations, typos, or non-master entities remain flagged `unmapped=True` for manual review rather than being guessed.
+- **Verification Impact:** Verified by `tests/property/test_symbols_properties.py` and `tests/unit/test_symbols.py` confirming zero fuzzy matching and version immutability.
 
 ---
 
 ### D-017: Multi-Reason Quarantine Aggregation via Vectorized DuckDB List Lambda
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.5 requires that rows failing validation rules are routed to quarantine with an array column `quarantine_reasons: list[str]` recording every violation triggered by that row (rather than halting on the first failure). Iterating row-by-row in Python is computationally slow and exceeds runtime budgets for multi-gigabyte drops.
+- **Context:** Rows failing multiple validation checks must record every violated rule name in `quarantine_reasons: list[str]` while sustaining high throughput over millions of rows.
 - **Options Considered:**
-  1. Row-by-row Python evaluation iterating through records and appending failure reason strings to a list.
-  2. Multiple SQL passes filtering rows for each rule and joining intermediate failure tables.
-  3. Single-pass vectorized SQL compiling each row predicate into a conditional expression (`CASE WHEN (<predicate>) THEN '<rule_name>' ELSE NULL END`), packing the results into a DuckDB array literal, and pruning null elements using DuckDB's native list lambda function: `list_filter([ ... ], lambda x: x IS NOT NULL)`.
-- **Decision:** Implement Option 3 in `RuleCompiler` and `ValidationEngine`. Every active row rule compiles into a CASE expression yielding either its rule identifier or NULL. All expressions are bundled into an array and filtered natively in DuckDB.
-- **Justification:** Vectorized list filtering executes entirely within DuckDB's C++ vectorized engine without transferring intermediate rows to Python. It produces complete multi-violation reason arrays in a single table scan, satisfying runtime budgets across large datasets.
-- **Consequences:** Rules must compile into valid DuckDB SQL boolean predicates. Quarantine schemas declare `quarantine_reasons` as `list_(pa.string())`.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_validate.py::test_combined_multiple_reasons` and `tests/unit/test_empirical_challenger2.py::test_simultaneous_multiple_row_failures`, proving rows failing multiple checks capture all triggered rule names in their quarantine reason list.
+  1. Per-row Python validation loops.
+  2. Multiple SQL passes per rule joined back by row ID.
+  3. Single-pass vectorized DuckDB SQL compiling each rule into `CASE WHEN (<predicate>) THEN '<rule_name>' ELSE NULL END` inside an array literal filtered via `list_filter([ ... ], lambda x: x IS NOT NULL)`.
+- **Decision:** Implement Option 3 in `RuleCompiler` and `ValidationEngine` inside `vdok/validate.py`.
+- **Justification:** Evaluates all active row rules in one C++ vectorized scan without transferring intermediate rows to Python.
+- **Consequences:** All row rules must compile to valid DuckDB SQL predicates; quarantine tables carry `quarantine_reasons` as `pa.list_(pa.string())`.
+- **Verification Impact:** Verified by `tests/unit/test_validate.py::test_combined_multiple_reasons` and `tests/unit/test_empirical_challenger2.py::test_simultaneous_multiple_row_failures`.
 
 ---
 
-### D-018: Window Ranking Materialization for Primary Key Duplicate Ratio and Escalation
+### D-018: Single Window Materialization for Duplicate Ratio and Escalation
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.5 and Guarantee 4 require duplicate detection on the canonical primary key (`entity_id, field, event_time, knowledge_time`). If the duplicate share is less than or equal to 1.0% (0.01), duplicate rows are routed to quarantine while unique first-occurrence rows proceed to the valid dataset. If duplicate share exceeds 1.0%, the entire drop batch must be escalated to a HOLD status, halting main ingestion. Calculating duplicate counts and routing individual duplicates separately would require multiple window function evaluations over massive tables.
+- **Context:** Primary key `(entity_id, field, event_time, knowledge_time)` duplicates must route to quarantine when their share is `≤ 1.0%` (`0.01`) and escalate to a full batch `hold` when their share exceeds `1.0%`.
 - **Options Considered:**
-  1. Two separate window evaluations: one aggregation query (`COUNT(*) > 1`) to calculate batch duplicate ratio, and a subsequent window query during row routing to isolate duplicate records.
-  2. Sorting the table in Python to identify duplicate keys and computing fractions in memory.
-  3. Materializing a temporary DuckDB view `numbered` computing `ROW_NUMBER() OVER (PARTITION BY entity_id, field, event_time, knowledge_time ORDER BY source_file, source_row) AS _vdok_dup_rank` once. The duplicate count is queried directly from `numbered WHERE _vdok_dup_rank > 1`, and `_vdok_dup_rank > 1` is incorporated into the vectorized quarantine reason array as `'duplicate_key'`.
-- **Decision:** Implement Option 3. Materialize the window calculation once in temporary view `numbered`.
-- **Justification:** Computing the window function once avoids redundant partitioning and sorting passes over large datasets. The resulting integer rank `_vdok_dup_rank` directly drives both the batch-level escalation check (`dup_share > max_ratio`) and row-level quarantine routing (`_vdok_dup_rank > 1`). First occurrences (`_vdok_dup_rank = 1`) pass through to the valid relation if no other rule triggers quarantine.
-- **Consequences:** Drop sorting is deterministic using `source_file, source_row`. Memory overhead is restricted to an integer rank column during the temporary view lifetime.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_validate.py::test_batch_duplicate_ratio_escalation` and `tests/unit/test_planted_faults_50mb.py::test_50mb_planted_fault_duplicate_row`, confirming sub-threshold duplicates are quarantined while super-threshold duplicates trigger batch holds.
+  1. Execute separate aggregation and routing window queries.
+  2. Sort records in Python memory.
+  3. Materialize a single temporary DuckDB view `numbered` computing `ROW_NUMBER() OVER (PARTITION BY entity_id, field, event_time, knowledge_time ORDER BY source_file, source_row) AS _vdok_dup_rank`, deriving both the batch duplicate count (`WHERE _vdok_dup_rank > 1`) and the row-level `'duplicate_key'` quarantine tag from that view.
+- **Decision:** Implement Option 3 in `ValidationEngine` (`vdok/validate.py`).
+- **Justification:** Evaluates the expensive partition-and-sort window once per drop while keeping deterministic ordering (`source_file, source_row`).
+- **Verification Impact:** Verified by `tests/unit/test_validate.py::test_batch_duplicate_ratio_escalation` and `tests/unit/test_planted_faults_50mb.py::test_50mb_planted_fault_duplicate_row`.
 
 ---
 
-### D-019: Exact Decimal Scale Validation in DuckDB Without Floating Point Conversion
+### D-019: Exact Decimal Scale Validation in DuckDB Without Float Conversion
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.4, § 5.5, and Guarantee 5 mandate that monetary values maintain exact decimal representation and scale without ever passing through IEEE 754 floating point arithmetic. Validation rule `decimal_scale` must verify that numeric values in decimal columns do not exceed a configured fractional digit limit (such as 4 decimal places for securities pricing).
+- **Context:** The `decimal_scale` validation rule must detect values exceeding a configured fractional digit limit without converting `decimal128` columns to floating-point types.
 - **Options Considered:**
-  1. Converting decimal values to Python `float` or SQL `DOUBLE` and inspecting modulo or string conversions.
-  2. Converting values to strings via `CAST(col AS VARCHAR)` and measuring substring length after the decimal separator.
-  3. Vectorized numeric comparison using DuckDB's exact decimal rounding: `ROUND(col, scale) != col`.
-- **Decision:** Implement Option 3. The rule compiler emits `({col} IS NOT NULL AND ROUND({col}, {scale}) != {col})`.
-- **Justification:** DuckDB executes `ROUND` directly on fixed-point `DECIMAL` types without intermediate floating point conversion. If a number contains fractional components beyond `scale` digits, `ROUND(col, scale)` differs from `col`, flagging the record. This maintains 100% adherence to the zero-float mandate of Section 13 while delivering high execution performance in SQL.
-- **Consequences:** Columns evaluated by `decimal_scale` must be numeric or Decimal representations in Arrow. Inputs outside the configured scale are quarantined with rule violation tags.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_validate.py::test_rule_decimal_scale_without_float` and `tests/unit/test_empirical_challenger2.py::test_decimal_scale_boundaries_and_precision`, confirming boundary scale values without float conversion.
+  1. Convert to `DOUBLE` and inspect modulo remainders.
+  2. Cast to `VARCHAR` and parse substring lengths after `.`.
+  3. Compare exact fixed-point rounding in DuckDB: `({col} IS NOT NULL AND ROUND({col}, {scale}) != {col})`.
+- **Decision:** Implement Option 3 in `RuleCompiler` (`vdok/validate.py`).
+- **Justification:** DuckDB executes `ROUND` directly on fixed-point `DECIMAL` values in vectorized C++ with zero floating-point conversion.
+- **Verification Impact:** Verified by `tests/unit/test_validate.py::test_rule_decimal_scale_without_float` and `tests/unit/test_empirical_challenger2.py::test_decimal_scale_boundaries_and_precision`.
 
 ---
 
 ### D-020: Deterministic 4-Tier Field Bucketing Without Inode Explosion
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.7 requires partitioning data as `store/<vendor>/<field_bucket>/<event_year>/part-<drop_id>.parquet`. If raw tags or fields each formed a directory, datasets with thousands of accounting line items (like SEC FSDS) would cause filesystem inode exhaustion and partition explosion. Conversely, placing all fields into a single catch-all folder eliminates thematic file pruning during queries.
+- **Context:** Partitioning Parquet files by raw `field` name across thousands of XBRL tags causes filesystem inode explosion, whereas a single flat folder eliminates partition pruning.
 - **Options Considered:**
-  1. Creating a directory for every unique field name or tag.
-  2. Single flat directory structure without field categorization.
-  3. Deterministic 4-tier taxonomy mapping fields into high-level thematic groups (`income_statement`, `balance_sheet`, `cash_flow`, `market_prices`, `macro`, and a `'general'` fallback).
-- **Decision:** Implement Option 3. Check manifest overrides first, followed by financial statement keyword taxonomies (cash flow before balance sheet to avoid collision on "cash"), market quotes, macroeconomic indicators, and a general fallback.
-- **Justification:** Bounding directory fanout to fewer than 10 directories per vendor prevents inode exhaustion while providing directory pruning during point-in-time analytical queries.
-- **Consequences:** Directory layout remains deterministic and bounded. Queries on specific statements or market prices only inspect relevant directory trees.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_store.py::test_resolve_field_bucket` and `test_write_partitioned_store_multi_partition`.
+  1. One directory per distinct field name.
+  2. Flat unbucketed directory per event year.
+  3. Deterministic 4-tier taxonomy (`resolve_field_bucket`) mapping fields to `income_statement`, `cash_flow`, `balance_sheet`, `market_prices`, `macro`, or `general` (with manifest override support and `cash_flow` evaluated prior to `balance_sheet` to disambiguate `cash`).
+- **Decision:** Implement Option 3 in `vdok/store.py`.
+- **Justification:** Caps directory fanout to fewer than 10 buckets per vendor while enabling directory-level pruning by financial domain and `event_year`.
+- **Verification Impact:** Verified by `tests/unit/test_store.py::test_resolve_field_bucket` and `test_write_partitioned_store_multi_partition`.
 
 ---
 
-### D-021: Read-Only POSIX 0o444 Partition Locking and Append-Only Collision Refusal
+### D-021: Read-Only POSIX `0o444` Partition Locking and Collision Refusal
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.7, Guarantee 1 (G1), and Guarantee 3 (G3) require that the partition store is strictly append-only. Partition files must be immutable once written, and attempting to overwrite an existing drop must be refused.
+- **Context:** Guarantee 1 (G1) and Guarantee 3 (G3) forbid in-place overwrites or deletions of committed store partitions.
 - **Options Considered:**
-  1. Standard file overwrite (`mode='w'`) with silent replacement.
-  2. Pre-write filesystem scanning for existing `part-<drop_id>.parquet` files, raising a dedicated `AppendOnlyViolationError(FileExistsError)` upon collision, and immediately setting written file modes to POSIX `0o444`.
-- **Decision:** Implement Option 2. Before any partition file is written, scan for existing matching partitions for `drop_id`. If detected, abort and raise `AppendOnlyViolationError`. Immediately after writing, lock file permissions with `os.chmod(path, 0o444)`.
-- **Justification:** Multiple layers of protection guarantee that historical records can never be mutated or replaced in place, preventing backtest look-ahead bias and preserving data integrity.
-- **Consequences:** Re-ingesting an identical drop requires explicit detection at the idempotency layer. Files cannot be modified in place.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_guarantees.py::test_g1_store_is_append_only` and `test_g3_rerun_same_drop_adds_no_rows`.
+  1. Standard writable file writes with overwrite allowed.
+  2. Pre-write scan for existing `part-<drop_id>.parquet` files raising `AppendOnlyViolationError(FileExistsError)` on collision, followed by immediate `os.chmod(path, 0o444)` after writing.
+- **Decision:** Implement Option 2 in `write_partitioned_store` (`vdok/store.py`).
+- **Justification:** Combines pre-write collision detection with OS-level read-only file permissions and zero update/delete APIs.
+- **Verification Impact:** Verified by `tests/unit/test_guarantees.py::test_g1_store_is_append_only` and `test_g3_rerun_same_drop_adds_no_rows`.
 
 ---
 
-### D-022: Windowed Revision Detection via Relational Distinct Comparisons
+### D-022: Windowed Revision Detection via Relational `IS DISTINCT FROM`
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.8 requires that after each drop, a query finds keys that already exist with different values at earlier knowledge times and catalogs them into a revisions ledger. Comparing against all historical vintages would cause Cartesian growth across cascading restatements.
+- **Context:** Comparing an incoming drop against every prior historical vintage causes quadratic growth across cascading restatements.
 - **Options Considered:**
-  1. Full Cartesian cross-join across all historical drops.
-  2. Windowed SQL ranking prior historical store records with `ROW_NUMBER() OVER (PARTITION BY entity_id, field, event_time ORDER BY knowledge_time DESC) = 1` and comparing incoming rows against this latest active baseline using `IS DISTINCT FROM`.
-- **Decision:** Implement Option 2. Query pairs incoming drop keys exclusively against the immediately prior latest state, using `IS DISTINCT FROM` across numeric, string, and unit fields.
-- **Justification:** Prevents redundant duplicate revision pairs when a single value undergoes successive revisions across drops 1, 2, and 3. `IS DISTINCT FROM` preserves exact decimal comparisons without float coercion.
-- **Consequences:** Memory and compute complexity scale linearly with incoming drop volume rather than quadratically with historical drop count.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_planted_restatements.py` achieving 100% recall and 100% precision on synthetic planted restatement sequences and at 50 MB scale.
+  1. Full cross-join against all historical drop records.
+  2. Rank prior store rows via `ROW_NUMBER() OVER (PARTITION BY entity_id, field, event_time ORDER BY knowledge_time DESC, drop_id DESC) = 1` and compare incoming keys against only the prior latest baseline using `IS DISTINCT FROM` across `(value_num, value_str, unit)` where `curr.knowledge_time > prev.old_knowledge_time`.
+- **Decision:** Implement Option 2 in `detect_revisions` (`vdok/revisions.py`).
+- **Justification:** Prevents duplicate revision emissions across multi-drop restatement chains and preserves exact decimal and null-safe comparisons.
+- **Verification Impact:** Verified by `tests/unit/test_planted_restatements.py` (100% recall and 100% precision).
 
 ---
 
-### D-023: Timezone-Aware Zero-Pytz Query Path via PyArrow Table Materialization
+### D-023: Timezone-Aware Zero-`pytz` Query Path via PyArrow Materialization
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 10 restricts runtime dependencies, prohibiting `pytz`. When DuckDB executes DB-API `fetchall()` on tables containing `TIMESTAMPTZ` columns, DuckDB raises an internal error attempting to import `pytz`.
+- **Context:** DuckDB's DB-API `fetchall()` attempts to import `pytz` when reading `TIMESTAMPTZ` columns, whereas the runtime relies solely on standard-library `zoneinfo`.
 - **Options Considered:**
-  1. Add `pytz` to dependencies (violates allowed dependency constraint Rule 4).
-  2. Strip timezone information from timestamps (violates UTC microsecond precision mandate).
-  3. Materialize DuckDB query results directly into PyArrow tables via `con.execute(...).to_arrow_table().to_pylist()`.
-- **Decision:** Implement Option 3 in `vdok/query.py` and format temporal strings with `strftime` in analytical reporting.
-- **Justification:** PyArrow uses Python 3.9+'s native standard library `zoneinfo.ZoneInfo(key='Etc/UTC')` for UTC timestamps, resolving timezone conversions without external packages.
-- **Consequences:** Eliminates third-party timezone dependencies while preserving microsecond precision across all query interfaces.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_query.py` and `tests/unit/test_revisions.py`.
+  1. Add `pytz` as a runtime dependency.
+  2. Drop timezone awareness from timestamps.
+  3. Materialize query results directly into Arrow tables via `.to_arrow_table().to_pylist()` and format timestamps in SQL via `strftime`.
+- **Decision:** Implement Option 3 across `vdok/query.py` and `vdok/report.py`.
+- **Justification:** PyArrow converts `timestamp[us, UTC]` columns natively using Python's standard library `zoneinfo`, preserving microsecond UTC precision with zero third-party timezone dependencies.
+- **Verification Impact:** Verified by `tests/unit/test_query.py` and `tests/unit/test_revisions.py`.
 
 ---
 
-### D-024: Drop-Level Knowledge Time Evaluation for Batch Temporal Coherence
+### D-024: Drop-Level Knowledge Time Pinning for Batch Temporal Coherence
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.3 allows `knowledge_time` to be derived either from a dedicated metadata column or from `drop_time`. When evaluating `knowledge_time` inside per-row parsing loops, repeated calls to `datetime.now(timezone.utc)` caused different rows within the same transmission drop to have microsecond-divergent knowledge timestamps.
+- **Context:** When `knowledge_time.source` is `drop_time`, calling `datetime.now(timezone.utc)` per row inside normalization loops yields microsecond-divergent knowledge timestamps for rows from the same drop.
 - **Options Considered:**
-  1. Evaluate `datetime.now(timezone.utc)` inside the per-row parsing iteration.
-  2. Pin a single batch-level UTC knowledge timestamp at drop initialization (`default_drop_kt`), applying this identical timestamp across all rows in the drop batch.
+  1. Evaluate `datetime.now(timezone.utc)` per row.
+  2. Pin a single `default_drop_kt` UTC timestamp once at drop initialization and apply it uniformly to all rows in the drop.
 - **Decision:** Implement Option 2 in `vdok/normalize.py`.
-- **Justification:** Records delivered in a single transmission drop share an identical knowledge time unless row-level filing timestamps state otherwise. Evaluating once at the drop boundary ensures deterministic bitemporal coordinates across the entire drop payload.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_normalize.py` and `tests/golden/test_report_goldens.py`.
+- **Justification:** Ensures deterministic bitemporal coordinates and reproducible `row_hash`/report spans across all rows delivered in one batch.
+- **Verification Impact:** Verified by `tests/unit/test_normalize.py` and `tests/golden/test_report_goldens.py`.
 
 ---
 
 ### D-025: Dual-Path Fallback for ISO-8601 and Delimited Timestamp Ingestion
 
-- **Date:** 2026-11-10
-- **Context:** Vendor manifests declare explicit timestamp formats (such as `%Y-%m-%d %H:%M:%S`), but transmission feeds frequently deliver ISO-8601 formatted timestamps with `T` separators and `Z` timezone designators. Strict format parsing raises ValueError when format specifiers deviate from payload variations.
+- **Context:** Vendor feeds occasionally mix manifest `strptime` formats (e.g., `%Y-%m-%d %H:%M:%S`) with ISO-8601 variants (`T` separators, `Z` suffixes).
 - **Options Considered:**
-  1. Enforce strict rejection of all timestamps that do not conform exactly to the declared format string.
-  2. Attempt manifest format parsing first; upon format failure, fall back to Python's standard `datetime.fromisoformat()`, followed by `dateutil.parser.parse()`, localizing naive timestamps to the declared manifest timezone and converting to UTC.
-- **Decision:** Implement Option 2 in `parse_timestamp_utc`.
-- **Justification:** Financial drops frequently mix strict date-time representations and ISO-8601 variations. Providing a resilient fallback prevents spurious ingestion aborts while maintaining strict conversion to UTC microsecond timestamps.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_normalize.py::test_parse_timestamp_utc_dateutil_fallback` and `tests/unit/test_onboard.py`.
+  1. Reject any timestamp not matching the exact `strptime` format string.
+  2. Attempt manifest `strptime` parsing first, falling back to `datetime.fromisoformat()` and `dateutil.parser.parse()`, then localizing naive timestamps to the manifest IANA timezone and converting to UTC.
+- **Decision:** Implement Option 2 in `parse_timestamp_utc` (`vdok/normalize.py`).
+- **Justification:** Prevents spurious rejections on ISO-8601 variations while maintaining strict UTC microsecond normalization.
+- **Verification Impact:** Verified by `tests/unit/test_normalize.py::test_parse_timestamp_utc_dateutil_fallback` and `tests/unit/test_onboard.py`.
 
 ---
 
-### D-026: Deterministic Multi-Tie Breaking and Relation Separation for Diff and Readiness Reports
+### D-026: Deterministic Multi-Tie Sorting and Relation Separation in Reporting
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 5.9 and § 5.10 require deterministic readiness reporting and drop diffing. In DuckDB, executing aggregation queries without explicit tie-breakers resulted in indeterminate dictionary key ordering for zero-rate restatements. Additionally, invoking `.to_arrow_table()` on active DB-API execute cursors raised `UserWarning` or `ResourceInUseException`.
+- **Context:** Readiness reports and golden outputs require bit-for-bit determinism regardless of DuckDB group iteration order, and calling `.to_arrow_table()` on active DB-API cursors triggers resource/cursor warnings.
 - **Options Considered:**
-  1. Rely on DuckDB internal group iteration order and DB-API cursor state.
-  2. Enforce deterministic multi-key sorting `(-rate, field_name)` across all report tables, use DuckDB's relation-level `.sql().to_arrow_table()` API, and utilize `.fetchall()[0][0]` for scalar count queries.
+  1. Rely on default SQL grouping order and cursor `execute()`.
+  2. Enforce explicit multi-key sorting (`(-rate, field_name)`), use DuckDB's relation API (`.sql().to_arrow_table()`), and use `.fetchall()[0][0]` for scalar counts.
 - **Decision:** Implement Option 2 in `vdok/report.py`.
-- **Justification:** Guarantees bit-for-bit identical markdown reports across runs regardless of query execution plans or filesystem iteration order. Eliminates connection cursor conflicts when running multiple analytical passes over Parquet views.
-- **Test Guarantee Impact:** Verified by `tests/golden/test_report_goldens.py` and `tests/unit/test_report.py`.
+- **Justification:** Produces reproducible Markdown and JSON reports across runs without cursor-state warnings.
+- **Verification Impact:** Verified by `tests/golden/test_report_goldens.py` and `tests/unit/test_report.py`.
 
 ---
 
-### D-027: Thread-Safe SEC EDGAR Rate Limiting and Atomic Ingestion Caching
+### D-027: Thread-Safe SEC EDGAR Rate Limiting and Atomic SHA-256 Caching
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 6.1 and Section 7 require rate-limiting requests to the SEC EDGAR system at at most 5 requests per second with a compliant User-Agent (`vendor-data-onboarding-kit <contact email>`), as well as caching downloads by SHA-256 hash in `data/raw/`.
+- **Context:** SEC EDGAR enforces strict request-rate and `User-Agent` rules (`vendor-data-onboarding-kit <contact>`), and multi-hundred-megabyte quarterly ZIP downloads must not leave partial files on interruption.
 - **Options Considered:**
-  1. Plain `time.sleep(0.2)` in iterative loops without concurrency safety or hash verification.
-  2. Implement a dedicated `SecRateLimiter` class using a thread-safe `threading.Lock` enforcing inter-request intervals of at least 0.25 seconds (at most 4 requests per second, strictly complying with the 5 rps ceiling). Stream downloads to `.tmp` files, compute SHA-256 digests in-flight, atomically replace targets upon verification, and store digests in `.sha256` sidecars for instant cache validation.
+  1. Unsynchronized `time.sleep(0.2)` loops writing directly to target paths.
+  2. Implement thread-safe `SecRateLimiter` (`threading.Lock` enforcing ≥ 0.25 s intervals, i.e., ≤ 4 req/s under the 5 req/s ceiling), stream downloads to `.tmp` files, compute SHA-256 digests in-flight, atomically rename upon completion, and store `.sha256` sidecars for cache hits.
 - **Decision:** Implement Option 2 in `vdok/adapters/sec_fsds.py`.
-- **Justification:** SEC EDGAR strictly blocks IP addresses that exceed 10 requests per second or fail User-Agent identification standards. Enforcing atomic streaming and sidecar hashing prevents corrupted partial archives from entering the store while eliminating duplicate downloads.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_sec_fsds.py` (rate limiting, User-Agent formatting, hash caching, and real download of 2023q3).
+- **Justification:** Complies with SEC access limits and guarantees atomic, hash-verified local caching in `data/raw/`.
+- **Verification Impact:** Verified by `tests/unit/test_sec_fsds.py`.
 
 ---
 
-### D-028: Vectorized DuckDB Normalization and Tolerant Schema Sampling for Multi-Million-Row Feeds
+### D-028: Vectorized DuckDB Normalization and Tolerant Schema Sampling
 
-- **Date:** 2026-11-10
-- **Context:** Real quarterly SEC FSDS archives contain over 3.5 million numeric records alongside companion documentation (`readme.htm`), alphanumeric postal codes (`zipba`, `zipma`), and comparative footnote periods spanning multiple decades. Additionally, synthetic multi-drop benchmarks inject isolated cell-level string corruptions (`10` cells in `200,000+` rows) that must route to row-level `type_flip` quarantine rather than triggering a batch-level `type_widened` hold.
+- **Context:** Real quarterly SEC FSDS archives exceed 3.5 million rows, include companion documentation files (`readme.htm`), alphanumeric postal codes, and multi-decade comparative footnotes. Additionally, small numbers of corrupted numeric cells (`10` cells in `200,000+` rows) should route to row-level `type_flip` quarantine rather than triggering a batch-level `type_widened` schema hold.
 - **Options Considered:**
-  1. Row-by-row Python normalization and zero-tolerance scalar type inference on every cell in a 200,000-row sample.
-  2. Vectorized DuckDB SQL normalization (`all_varchar=True`, exact `DECIMAL(38, 9)` casting, distinct entity lookup joins, and bit-identical `sha256` row hashing), non-data sidecar filtering during directory discovery, `≤ 1.0%` cell-anomaly tolerance on samples with `≥ 100` non-null values during schema drift checks, and evaluating `COVERAGE_GAP` after row-level quarantine predicates.
+  1. Row-by-row Python normalization and zero-tolerance scalar type inference.
+  2. Vectorized DuckDB SQL normalization (`all_varchar=True`, exact `DECIMAL(38, 9)` casting, distinct entity lookup joins, bit-identical `sha256` row hashing), non-data sidecar filtering in `discover.scan`, `≤ 1.0%` cell-anomaly tolerance on samples with `≥ 100` non-null values in `vdok/schema.py`, and evaluating `COVERAGE_GAP` after row-level quarantine in `vdok/validate.py`.
 - **Decision:** Implement Option 2 across `vdok/adapters/sec_fsds.py`, `vdok/normalize.py`, `vdok/discover.py`, `vdok/schema.py`, and `vdok/validate.py`.
-- **Justification:** Vectorized normalization reduces 3.5-million-row SEC ingestion to ~13 seconds without floating-point intermediaries, while `≤ 1.0%` sample tolerance distinguishes cell-level data defects (routed to `quarantine.parquet`) from column-wide vendor type widening (held at the schema gate).
-- **Test Guarantee Impact:** Verified by `tests/golden/test_report_goldens.py`, `tests/unit/test_planted_faults_50mb.py`, and real SEC `2023q3`/`2023q4` onboarding runs.
+- **Justification:** Sustains multi-million-row normalization without floating-point intermediaries while cleanly separating cell-level defects (`quarantine`) from column-wide structural widening (`hold`).
+- **Verification Impact:** Verified by `tests/golden/test_report_goldens.py`, `tests/unit/test_planted_faults_50mb.py`, and real SEC `2023q3`/`2023q4` onboarding benchmarks.
 
 ---
 
-### D-029: Sorted Partition MD5 Prefix Index and Unpruned Streaming Reference Oracle
+### D-029: Sorted Partition MD5 Prefix Index and Unpruned Streaming Oracle
 
-- **Date:** 2026-11-10
-- **Context:** SPEC § 8 requires executing 100,000 random `Store.value()` point-in-time queries per benchmark iteration and asserting zero violations against a brute-force reference implementation that scans all stored rows without exceeding single-node memory limits.
+- **Context:** Benchmarks verify 100,000 random `Store.value()` point-in-time queries per iteration with zero violations against an independent brute-force reference scan within single-node memory limits.
 - **Options Considered:**
-  1. Execute 100,000 individual DuckDB `read_parquet` SQL queries per iteration and materialize the entire multi-million-row store as Python dictionaries in `BruteForceStore`.
-  2. Cache per-partition `(bucket, year)` Arrow tables sorted by 64-bit unsigned MD5 key prefix (`_k64 ASC, knowledge_time DESC, drop_id DESC`) queried via `bisect_left` over zero-copy `memoryview` scalar buffers (bounded by a 2 GiB cache budget), and verify batch results against `BruteForceStore.batch_values_unpruned`, which streams every data Parquet file across all buckets and years via PyArrow `ParquetFile.iter_batches` with zero directory pruning, zero SQL, and zero hash indexing.
+  1. Run 100,000 separate DuckDB `read_parquet` queries and materialize the full store in Python dictionaries for `BruteForceStore`.
+  2. Cache per-partition `(bucket, year)` Arrow tables sorted by `(_k64 ASC, knowledge_time DESC, drop_id DESC)` queried via `bisect_left` over zero-copy `memoryview` buffers (2 GiB / 256-partition cache budget), and verify batches against `BruteForceStore.batch_values_unpruned` streaming every Parquet partition via `ParquetFile.iter_batches` with zero pruning or indexing.
 - **Decision:** Implement Option 2 in `vdok/query.py`.
-- **Justification:** Binary search over sorted 8-byte scalar buffers answers 100,000 `Store.value()` calls in sub-second wall time while enforcing `knowledge_time ≤ as_of` (G2), and the unpruned streaming PyArrow reference oracle independently checks every stored Parquet batch in bounded memory.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_guarantees.py`, `tests/property/test_store_properties.py`, and `tests/unit/test_bench.py` (0 violations across 100,000 queries per run).
+- **Justification:** Answers 100,000 `Store.value()` lookups in sub-second wall time while enforcing `knowledge_time ≤ as_of` (G2) and bounding memory in both `Store` and `BruteForceStore`.
+- **Verification Impact:** Verified by `tests/unit/test_guarantees.py`, `tests/property/test_store_properties.py`, and `tests/unit/test_bench.py`.
 
 ---
 
-### D-030: Per-Iteration Subprocess Isolation for Process-Tree Peak RSS Measurement
+### D-030: Per-Iteration Subprocess Isolation for Process-Tree Peak RSS
 
-- **Date:** 2026-11-10
-- **Context:** POSIX `resource.getrusage` reports a monotonically non-decreasing lifetime maximum resident set size (`ru_maxrss`) per OS process, and native C++ allocators in DuckDB and PyArrow retain virtual and resident memory arenas across in-process loops.
+- **Context:** POSIX `resource.getrusage` tracks a monotonically non-decreasing lifetime high-water mark per process, and native DuckDB/PyArrow C++ allocators retain memory arenas across in-process iterations.
 - **Options Considered:**
-  1. Run all `RUNS` benchmark iterations inside a single Python process.
-  2. Spawn a dedicated child Python subprocess (`--internal-worker`) for each benchmark iteration, recording `(RUSAGE_SELF + RUSAGE_CHILDREN)` peak RSS inside the isolated worker and removing temporary store artifacts between runs.
+  1. Execute all benchmark runs inside a single Python process.
+  2. Spawn an isolated `--internal-worker` child subprocess per benchmark iteration, recording `(RUSAGE_SELF + RUSAGE_CHILDREN)` peak RSS inside each worker and removing temporary store artifacts between runs.
 - **Decision:** Implement Option 2 in `bench/run.py`.
-- **Justification:** Guarantees that every iteration reports an independent OS kernel resident memory high-water mark and reclaims all native C++ memory pages before the next run starts.
-- **Test Guarantee Impact:** Verified by `tests/unit/test_bench.py::test_bench_cli_subprocess_entrypoint` and multi-run `make bench` executions.
-
-
+- **Justification:** Measures an independent OS kernel resident memory high-water mark per run and reclaims all native C++ pages between iterations.
+- **Verification Impact:** Verified by `tests/unit/test_bench.py::test_bench_cli_subprocess_entrypoint` and multi-run `make bench` outputs.

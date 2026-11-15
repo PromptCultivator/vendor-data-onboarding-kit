@@ -2,97 +2,66 @@
 
 ## 1. Overview & Responsibility
 
-The `vdok.cli` module exposes the platform's capabilities via a unified command-line application built with Typer. Designed for quantitative analysts, data engineers, and automated scheduled batch runners (e.g., cron, Airflow, Prefect), the CLI provides composable commands for onboarding, schema management, diffing, reporting, and data leak auditing.
-
-The console script entry point is registered as `vdok` in `pyproject.toml`.
+`vdok.cli` exposes the toolkit through a Typer command-line application registered as the console entry point `vdok` in `pyproject.toml`. All commands validate input paths and arguments strictly and emit deterministic exit codes (`0` success, `1` batch hold or look-ahead leaks detected, `2` missing file/argument or configuration error) for headless batch and CI automation.
 
 ---
 
-## 2. Command Hierarchy
+## 2. Command Tree
 
 ```
 vdok
-├── schema
-│   ├── infer     # Sample raw data files and generate contract draft
-│   ├── pin       # Pin inferred schema as an authoritative contract
-│   ├── check     # Compare a drop against the pinned contract
-│   └── accept    # Accept proposed schema modifications
-├── onboard       # Execute full ingestion, validation, and storage
-├── report        # Compile readiness scorecard and vendor inquiries
-├── diff          # Compare two drops and identify restatements
-├── synth         # Generate synthetic drops with planted faults
-└── leaks         # Audit query logs for temporal causality violations
+├── version        # Print installed package version
+├── data           # Download SEC FSDS quarterly archives and symbol master
+├── synth          # Generate seeded synthetic drops with planted faults
+├── onboard        # Run discovery, schema check, normalization, validation, store, revisions, report
+├── report         # Render or inspect a readiness report (Markdown or JSON)
+├── diff           # Compare two committed drops for key, value, and schema differences
+├── leaks          # Audit query_audit.jsonl logs for look-ahead violations
+└── schema
+    ├── infer      # Sample raw files and emit inferred YAML schema
+    ├── pin        # Pin inferred schema to schemas/<vendor>.yaml
+    ├── check      # Compare drop against pinned schema
+    └── accept     # Apply and bump pinned schema version
 ```
 
 ---
 
-## 3. Subcommand Specifications & Invocations
+## 3. Command Invocations
 
-### 3.1 `vdok schema` Group
-
+### 3.1 `vdok data`
 ```bash
-# Infer schema from raw vendor files
-vdok schema infer data/raw/sec_fsds/2023q4/ --sample-rows 200000 -o schemas/sec_fsds.draft.yaml
+vdok data --quarters 2023q3,2023q4 --raw-dir data/raw/sec_fsds --symbols-dir data/symbols
+```
+Supports `--user-agent`, `--extract/--no-extract`, `--force`, and `--json-output`.
 
-# Pin schema as the authoritative contract
-vdok schema pin schemas/sec_fsds.draft.yaml -o schemas/sec_fsds.yaml
-
-# Check a new drop for schema drift
-vdok schema check sec_fsds data/raw/sec_fsds/2024q1/
-
-# Accept schema changes proposed in a readiness report
-vdok schema accept sec_fsds
+### 3.2 `vdok synth`
+```bash
+vdok synth --size-gb 1 --seed 1 --faults default --format csv --num-drops 3 --output-dir data/raw/synthetic
 ```
 
-### 3.2 `vdok onboard`
-Executes discovery, schema checking, normalization, validation, partitioned store write, and revision detection in a single execution pass:
-
+### 3.3 `vdok schema` Group
 ```bash
-vdok onboard sec_fsds data/raw/sec_fsds/2023q4/ --as-of "2024-01-15T00:00:00Z"
+vdok schema infer sec_fsds data/raw/sec_fsds/2023q3 --sample-rows 200000 -o schemas/sec_fsds.draft.yaml
+vdok schema pin sec_fsds data/raw/sec_fsds/2023q3 --schema-dir schemas
+vdok schema check sec_fsds data/raw/sec_fsds/2023q4 --schema-dir schemas
+vdok schema accept sec_fsds --drop-path data/raw/sec_fsds/2023q4 --schema-dir schemas
 ```
 
-Exit Codes:
-- `0`: Ingestion completed successfully (`READY` or `READY WITH WARNINGS`).
-- `1`: Batch placed on `HOLD` due to structural violations or volume collapse.
-- `2`: System execution error (I/O, invalid arguments, or missing manifest).
-
-### 3.3 `vdok report`
-Generates human-readable Markdown and machine-readable JSON readiness reports:
-
+### 3.4 `vdok onboard`
 ```bash
-vdok report sec_fsds --drop 8f9a2e3b1c4d5e6f --output-dir data/results/sec_fsds/
+vdok onboard sec_fsds data/raw/sec_fsds/2023q3 --as-of "2024-01-15T00:00:00Z"
 ```
+Supports `--manifest`, `--rules`, `--symbols`, `--store-dir`, `--results-dir`, and `--force`. Exits `0` on `READY` / `READY WITH WARNINGS`, `1` on `HELD`, and `2` on invalid paths or missing configuration.
 
-### 3.4 `vdok diff`
-Performs drop-over-drop analytical diffing between two historical drops:
-
+### 3.5 `vdok report` and `vdok diff`
 ```bash
-vdok diff sec_fsds drop_001 drop_002
+vdok report sec_fsds --drop <drop_id> --results-dir data/results
+vdok diff sec_fsds <drop_a> <drop_b> --store-dir data/store
 ```
+Both commands support `--json-output`. When `--drop` is omitted on `vdok report`, the most recent report under `data/results/<vendor>/` is displayed.
 
-Outputs tabular counts of added keys, dropped keys, restated values, and unchanged entries.
-
-### 3.5 `vdok leaks`
-Inspects historical query audit logs to verify that strategy backtests operated without look-ahead bias:
-
+### 3.6 `vdok leaks`
 ```bash
-vdok leaks --log data/audit/query_log.jsonl --decision-time-column decision_time
+vdok leaks --log data/store/sec_fsds/audit/query_audit.jsonl --decision-time-column decision_time
 ```
-
-Reports temporal violations where query requests exceeded model decision timestamps.
-
-### 3.6 `vdok synth`
-Generates reproducible synthetic datasets for pipeline benchmarking and stress testing:
-
-```bash
-vdok synth --size-gb 1 --seed 42 --faults default --output-dir data/synth/
-```
-
----
-
-## 4. Integration with Automation Tooling
-
-The CLI is designed for direct integration with standard CI/CD runners and workflow orchestrators:
-- Emits structured exit codes.
-- Writes diagnostic error messages to `stderr` and structured results to `stdout`.
-- Avoids interactive prompts during standard operation to ensure headless automation reliability.
+Exits `0` when zero look-ahead violations are found and `1` when any as-of or knowledge leak is detected.

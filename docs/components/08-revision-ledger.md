@@ -2,100 +2,44 @@
 
 ## 1. Overview & Responsibility
 
-The `vdok.revisions` module identifies and catalogs historical data restatements. When a vendor publishes a subsequent data drop, they frequently alter historical observations (e.g., a corporate filer amending a previous quarter's net income, or an economic agency issuing revised GDP benchmarks).
-
-Traditional data ingestion pipelines overwrite previous records with new values, destroying the historical audit trail. `vdok.revisions` computes drop-over-drop differences, extracts restatements into a permanent revision ledger, and calculates revision rates across financial metrics.
+`vdok.revisions` detects historical restatements whenever a new drop updates a previously recorded `(entity_id, field, event_time)` key at a newer `knowledge_time`, records those changes in `metadata/revisions.parquet`, and computes per-drop and per-field revision statistics.
 
 ---
 
-## 2. Restatement Detection Algorithm
+## 2. Windowed Restatement Detection (`detect_revisions`)
 
-Following the validation and ingestion of drop N, the revision engine compares the new drop against all prior committed vintages in the store.
+Comparing an incoming drop against every historical vintage would multiply cascading restatements across drops. Instead, `detect_revisions` executes a windowed DuckDB SQL query comparing incoming records exclusively against the single latest prior baseline:
 
-A record is classified as a restatement if:
-1. It shares an identical logical key `(entity_id, field, event_time)` with an existing record.
-2. The incoming record has a later knowledge timestamp:
-   `t_knowledge_new > t_knowledge_old`
-3. The observation payload differs beyond floating-point rounding tolerance:
-   `|v_num_new - v_num_old| > ε` or `v_str_new ≠ v_str_old` or `u_new ≠ u_old`
-
-```sql
-SELECT
-    curr.entity_id,
-    curr.field,
-    curr.event_time,
-    prev.value_num AS old_value_num,
-    curr.value_num AS new_value_num,
-    prev.value_str AS old_value_str,
-    curr.value_str AS new_value_str,
-    prev.unit AS old_unit,
-    curr.unit AS new_unit,
-    prev.knowledge_time AS old_knowledge_time,
-    curr.knowledge_time AS new_knowledge_time,
-    prev.drop_id AS old_drop_id,
-    curr.drop_id AS new_drop_id,
-    CASE
-        WHEN prev.value_num IS NOT NULL AND prev.value_num != 0
-        THEN (curr.value_num - prev.value_num) / ABS(prev.value_num)
-        ELSE NULL
-    END AS relative_change
-FROM normalized_current_drop curr
-JOIN prior_latest_state prev
-  ON curr.entity_id = prev.entity_id
- AND curr.field = prev.field
- AND curr.event_time = prev.event_time
-WHERE (
-    curr.value_num IS DISTINCT FROM prev.value_num
-    OR curr.value_str IS DISTINCT FROM prev.value_str
-    OR curr.unit IS DISTINCT FROM prev.unit
-)
-AND curr.knowledge_time > prev.knowledge_time;
-```
+1. **`current_drop`**: Selects the latest `(knowledge_time DESC, source_row DESC)` entry per `(entity_id, field, event_time)` in the incoming drop.
+2. **`prior_latest`**: Ranks prior store records (`drop_id != incoming_drop_id`) with `ROW_NUMBER() OVER (PARTITION BY entity_id, field, event_time ORDER BY knowledge_time DESC, drop_id DESC) = 1`.
+3. **Relational Distinct Comparison**: Joins `current_drop` to `prior_latest` where `curr.knowledge_time > prev.old_knowledge_time` and payload fields differ under null-safe `IS DISTINCT FROM`:
+   `curr.value_num IS DISTINCT FROM prev.old_value_num OR curr.value_str IS DISTINCT FROM prev.old_value_str OR curr.unit IS DISTINCT FROM prev.old_unit`.
 
 ---
 
-## 3. Revision Ledger Data Model
+## 3. Revision Ledger Schema (`REVISIONS_ARROW_SCHEMA`)
 
-Restatements are recorded permanently in `data/store/<vendor>/metadata/revisions.parquet`:
+Restatements are persisted in `data/store/<vendor>/metadata/revisions.parquet` and synchronized into the `revisions` table of `store.duckdb`:
 
-| Column | Type | Description |
+| Column | Arrow Type | Description |
 |---|---|---|
 | `entity_id` | `string` | Canonical entity identifier |
 | `field` | `string` | Normalized metric identifier |
-| `event_time` | `timestamp[us, UTC]` | Period end date of the restated metric |
-| `old_value_num` | `decimal128(38, 9)` | Numerical value prior to restatement |
-| `new_value_num` | `decimal128(38, 9)` | Numerical value following restatement |
-| `old_value_str` | `string` | Categorical string prior to restatement |
-| `new_value_str` | `string` | Categorical string following restatement |
-| `old_unit` | `string` | Unit of measure prior to restatement |
-| `new_unit` | `string` | Unit of measure following restatement |
-| `old_knowledge_time`| `timestamp[us, UTC]` | Publication timestamp of the original value |
-| `new_knowledge_time`| `timestamp[us, UTC]` | Publication timestamp of the restated value |
-| `old_drop_id` | `string` | Originating drop ID of the prior vintage |
-| `new_drop_id` | `string` | Originating drop ID of the restating drop |
-| `relative_change` | `float64` | Fractional delta: `(V_new - V_old) / |V_old|` |
-| `detected_at` | `timestamp[us, UTC]` | Ingestion execution timestamp |
+| `event_time` | `timestamp[us, UTC]` | Observation period timestamp |
+| `old_value_num` | `decimal128(38, 9)` | Prior fixed-point numeric value |
+| `new_value_num` | `decimal128(38, 9)` | Updated fixed-point numeric value |
+| `old_value_str` | `string` | Prior textual value |
+| `new_value_str` | `string` | Updated textual value |
+| `old_unit` | `string` | Prior unit of measure |
+| `new_unit` | `string` | Updated unit of measure |
+| `old_knowledge_time` | `timestamp[us, UTC]` | Prior visibility timestamp |
+| `new_knowledge_time` | `timestamp[us, UTC]` | Restated visibility timestamp |
+| `old_drop_id` | `string` | Source drop ID of prior baseline |
+| `new_drop_id` | `string` | Source drop ID of restating drop |
+| `relative_change` | `float64` | `(new_value_num - old_value_num) / abs(old_value_num)` when non-zero |
 
 ---
 
-## 4. Multi-Drop Diffing Interface (`vdok diff`)
+## 4. Revision Analytics & Silent Overwrite Signals (`compute_revision_rates`)
 
-The CLI provides an explicit comparison tool for inspecting variances between arbitrary drops:
-
-```bash
-vdok diff sec_fsds drop_2023q3 drop_2023q4
-```
-
-The diff engine classifies records into four disjoint subsets:
-1. **Added Keys**: Entities or metrics present in `drop_b` that did not exist in `drop_a`.
-2. **Removed Keys**: Observations present in `drop_a` that are missing from `drop_b`.
-3. **Restated Values**: Observations with matching keys but divergent values.
-4. **Unchanged Records**: Exact matches across both drops.
-
----
-
-## 5. Vendor Behavior Diagnostics
-
-The revision ledger provides operational signals regarding vendor data management practices:
-- **High Revision Rates**: If > 5% of a vendor's historical records undergo revision per drop, data quality warnings are surfaced.
-- **Zero Revisions Alert**: If a vendor reports zero revisions across four or more consecutive drops for macroeconomic or financial datasets known to undergo regular adjustment, the engine alerts operators to possible data freezing or lack of revision tracking on the vendor's side.
+`RevisionStats` reports total revisions, drop-level revision rate, per-field revision rates, largest relative changes, and silent-overwrite alerts (`silent_overwrite_fields`) when a field exhibits zero revisions across more than 3 consecutive drops.

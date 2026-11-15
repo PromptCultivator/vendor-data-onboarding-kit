@@ -3,7 +3,7 @@
 
 Samples authentic SEC quarterly releases to construct test fixtures covering
 at least 50 CIKs and at least 20 revision pairs across consecutive quarters.
-Documented in tests/fixtures/README.md per SPEC Section 6.1.
+Documented in tests/fixtures/README.md.
 """
 
 from __future__ import annotations

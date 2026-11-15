@@ -2,112 +2,62 @@
 
 ## 1. Overview & Responsibility
 
-The vendor manifest is the declarative specification that configures how raw vendor drops are interpreted, parsed, validated, and normalized. Every onboarded vendor requires a declarative configuration file placed in `manifests/<vendor>.yaml`.
-
-The `vdok.manifest` module parses, validates, and serializes these files into strongly typed Pydantic models. It guarantees that all subsequent pipeline stages (discovery, normalization, validation, and storage) operate against verified configuration contracts.
+`vdok.manifest` parses, validates, and serializes declarative vendor configurations stored in `manifests/<vendor>.yaml`. Every downstream pipeline stage—discovery, schema checking, normalization, validation, storage, and reporting—consumes a validated `VendorManifest` instance.
 
 ---
 
-## 2. Specification & Data Structure
-
-### 2.1 Configuration Schema
+## 2. Configuration Schema
 
 ```yaml
-vendor: sec_fsds                          # Unique alphanumeric vendor identifier
-entity_columns: [cik]                     # Columns that identify the entity, in priority order
-entity_id_type: cik                       # cik | ticker | isin | cusip | vendor_id
-event_time_column: ddate                  # Source column denoting the observation timestamp
-event_time_format: "%Y%m%d"               # strptime format string or ISO-8601 specifier
+vendor: sec_fsds
+entity_columns: [cik]
+entity_id_type: cik
+event_time_column: ddate
+event_time_format: "%Y%m%d"
 knowledge_time:
-  source: column                          # column | drop_time
-  column: filed                           # Required when source is column
-  format: "%Y%m%d"                        # Parsing format when source is column
-timezone: UTC                             # Source timezone for naive timestamps
-value_columns: [value]                    # Columns containing quantitative or categorical facts
-unit_column: uom                          # Optional column naming the measurement unit
-field_columns: [tag]                      # Columns combined to form the canonical field name
-expected_calendar: quarterly              # daily | weekly | monthly | quarterly | none
-expected_universe: null                   # Optional path to a file containing expected entity IDs
-rules: rules/sec_fsds.yaml                # Relative path to compiled validation rules
+  source: column
+  column: filed
+  format: "%Y%m%d"
+timezone: UTC
+value_columns: [value]
+unit_column: uom
+field_columns: [tag]
+expected_calendar: quarterly
+expected_universe: null
+rules: rules/sec_fsds.yaml
 ```
 
 ---
 
-## 3. Pydantic Model Architecture
+## 3. Pydantic v2 Data Model
 
-The implementation uses Pydantic v2 to validate configuration types and enforce invariants:
+`vdok/manifest.py` defines strongly typed enumerations and validators:
 
-```python
-from enum import Enum
-from pathlib import Path
-from pydantic import BaseModel, Field, model_validator
-
-
-class EntityIdType(str, Enum):
-    CIK = "cik"
-    TICKER = "ticker"
-    ISIN = "isin"
-    CUSIP = "cusip"
-    VENDOR_ID = "vendor_id"
-
-
-class ExpectedCalendar(str, Enum):
-    DAILY = "daily"
-    WEEKLY = "weekly"
-    MONTHLY = "monthly"
-    QUARTERLY = "quarterly"
-    NONE = "none"
-
-
-class KnowledgeTimeSource(str, Enum):
-    COLUMN = "column"
-    DROP_TIME = "drop_time"
-
-
-class KnowledgeTimeConfig(BaseModel):
-    source: KnowledgeTimeSource
-    column: str | None = None
-    format: str | None = None
-
-    @model_validator(mode="after")
-    def verify_column_requirements(self) -> "KnowledgeTimeConfig":
-        if self.source == KnowledgeTimeSource.COLUMN and not self.column:
-            raise ValueError("Knowledge time source 'column' requires 'column' name")
-        return self
-
-
-class VendorManifest(BaseModel):
-    vendor: str = Field(..., pattern=r"^[a-z0-9_-]+$")
-    entity_columns: list[str] = Field(..., min_length=1)
-    entity_id_type: EntityIdType
-    event_time_column: str
-    event_time_format: str = "%Y-%m-%d"
-    knowledge_time: KnowledgeTimeConfig
-    timezone: str = "UTC"
-    value_columns: list[str] = Field(..., min_length=1)
-    unit_column: str | None = None
-    field_columns: list[str] = Field(default_factory=list)
-    expected_calendar: ExpectedCalendar = ExpectedCalendar.NONE
-    expected_universe: Path | None = None
-    rules: Path | None = None
-```
+- **`EntityIdType`**: `cik`, `ticker`, `isin`, `cusip`, `vendor_id`.
+- **`ExpectedCalendar`**: `daily`, `weekly`, `monthly`, `quarterly`, `none`.
+- **`KnowledgeTimeSource`**: `column`, `drop_time`.
+- **`KnowledgeTimeConfig`**: Validates via `model_validator(mode="after")` that `column` is provided whenever `source == "column"`.
+- **`VendorManifest`**:
+  - Enforces `vendor` pattern `^[a-z0-9_-]+$`, non-empty `entity_columns` (in fallback priority order), and non-empty `value_columns`.
+  - Validates `timezone` against standard-library `zoneinfo.ZoneInfo`.
+  - Exposes `from_yaml`, `from_file`, `to_yaml`, and `to_file`.
 
 ---
 
 ## 4. Operational Invariants
 
-1. **Temporal Definition**: If `knowledge_time.source` is `drop_time`, the system sets knowledge time to the arrival timestamp recorded at drop ingestion. If `column` is specified, the source file must provide valid date or datetime values.
-2. **Deterministic Precedence**: `entity_columns` defines a priority hierarchy. The normalizer evaluates columns from left to right, selecting the first non-null identifier present in the record.
-3. **Calendar Expectation**: `expected_calendar` governs gap detection within the readiness report. If a quarterly dataset lacks observations for an entire calendar quarter, validation marks the absence as an anomaly.
+1. **Knowledge Timestamp Source**: When `knowledge_time.source` is `drop_time`, normalization applies a single drop-level UTC receipt timestamp (or CLI `--as-of` override). When `source` is `column`, timestamps are parsed from the named source column.
+2. **Entity Column Precedence**: `entity_columns` lists candidate identifier columns from left to right; normalization selects the first non-null identifier per row.
+3. **Calendar Expectations**: `expected_calendar` drives period aggregation and missing-period gap detection in validation (`coverage_gap`) and readiness reporting (`compute_coverage`).
 
 ---
 
-## 5. Error Modes & Edge Cases
+## 5. Error Modes
 
-| Failure Mode | Detection Mechanism | System Action |
+| Failure Mode | Detection Mechanism | System Behavior |
 |---|---|---|
-| Manifest File Missing | File system existence check | Halts CLI execution with non-zero exit code |
-| Invalid YAML Syntax | YAML parser exception | Emits syntax location error; aborts pipeline |
-| Unknown Identifier Type | Pydantic enum validation | Rejects configuration; displays valid types |
-| Missing Knowledge Column | Model cross-field validator | Rejects configuration before file processing |
-| Unknown Timezone Identifier | `zoneinfo` lookup validation | Rejects configuration before parsing timestamps |
+| Missing manifest file | `VendorManifest.from_file` existence check | Raises `FileNotFoundError`; CLI exits with code `2` |
+| Non-mapping / invalid YAML | `yaml.safe_load` type check | Raises `ValueError` |
+| Unknown identifier or calendar enum | Pydantic `Enum` validation | Raises `ValidationError` |
+| Missing `knowledge_time.column` | `KnowledgeTimeConfig` model validator | Raises `ValueError` before ingestion |
+| Invalid IANA timezone | `zoneinfo.ZoneInfo(v)` lookup | Raises `ValueError` |

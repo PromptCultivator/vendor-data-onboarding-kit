@@ -31,7 +31,7 @@ Ingestion pipelines face a dilemma:
 ## Decision
 Adopt **Option 3 (Multi-Tier Severity Routing)**.
 
-- **Row-level anomalies** (such as out-of-bounds metrics, malformed dates, unmapped identifiers, or duplicate keys below 1% threshold) route affected records into `quarantine.parquet` while allowing valid records to proceed to partitioned storage.
+- **Row-level anomalies** (such as out-of-bounds metrics, malformed dates, disallowed units, or duplicate keys below 1% threshold) route affected records into `quarantine.parquet` while allowing valid records to proceed to partitioned storage.
 - **Batch-level anomalies** (such as unexpected column removals, type widening, drop volume falling below 50% or exceeding 200% of trailing median, duplicate ratios exceeding 1%, or multi-period coverage dropouts) place the entire drop in `hold` status, writing zero rows to the main store.
 
 ## Consequences

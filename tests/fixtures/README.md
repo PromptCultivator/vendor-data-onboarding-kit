@@ -1,27 +1,21 @@
 # Test Fixtures Provenance and Selection
 
-This directory contains deterministic test fixtures used by the test suite and continuous integration pipeline.
+This directory contains deterministic offline fixtures used by the test suite and CI pipeline.
 
 ## 1. SEC Financial Statement Data Sets (FSDS)
 
 ### Provenance and License
-The SEC Financial Statement Data Sets are compiled and published quarterly by the US Securities and Exchange Commission (SEC) Office of Structured Disclosure (OSD) in the public domain.
-
-Source archive locations:
+The SEC Financial Statement Data Sets are published quarterly in the public domain by the U.S. Securities and Exchange Commission (SEC) Office of Structured Disclosure:
 - `https://www.sec.gov/files/dera/data/financial-statement-data-sets/2023q3.zip`
 - `https://www.sec.gov/files/dera/data/financial-statement-data-sets/2023q4.zip`
 
 ### Structure
-The SEC FSDS fixture directory (`tests/fixtures/sec_fsds`) provides two sequential quarters:
-- `2023q3/`:
-  - `sub.txt`: Submissions metadata (accession number `adsh`, `cik`, company name, filing date `filed`, etc.).
-  - `num.txt`: Numerical disclosures (accession number `adsh`, financial `tag`, `ddate`, `qtrs`, `uom`, `value`).
-- `2023q4/`:
-  - `sub.txt`: Submissions metadata for subsequent quarter filings.
-  - `num.txt`: Numerical disclosures for subsequent quarter filings, including restatements of earlier periods.
+The fixture directory (`tests/fixtures/sec_fsds/`) provides two consecutive quarters:
+- `2023q3/`: `sub.txt` (submissions metadata) and `num.txt` (numeric disclosures).
+- `2023q4/`: `sub.txt` and `num.txt` for the subsequent quarter, including restatements of `2023q3` observations.
 
-### Selection Command
-Per Section 6.1 of the specification, fixtures are sampled deterministically by hash from source data:
+### Selection and Generation Commands
+Fixtures are sampled deterministically by hash from downloaded quarterly archives:
 
 ```bash
 python scripts/select_sec_fixtures.py \
@@ -33,27 +27,25 @@ python scripts/select_sec_fixtures.py \
   --min-revisions 20
 ```
 
-When raw multi-gigabyte quarterly downloads are not locally mounted, the generator script provides an identical deterministic schema fixture:
+When raw quarterly downloads are unavailable locally, the synthetic SEC schema fixture generator produces deterministic schema-matching fixtures:
 
 ```bash
 python tests/fixtures/generate_sec_fixtures.py
 ```
 
-### Coverage and Verification Criteria
-The test suite enforces the following acceptance thresholds on the SEC FSDS fixtures:
-1. **Entity Coverage**: At least 50 distinct corporate Central Index Keys (CIKs).
-2. **Restatement Ground Truth**: At least 20 revision pairs detected across consecutive quarters (`2023q3` and `2023q4`).
-3. **Point-In-Time Integrity**: 0 point-in-time violations during retrospective bitemporal queries.
-4. **Symbol Resolution**: Mapped identifier share exceeds 95% against the symbol master reference.
+### Verification Criteria
+The SEC FSDS fixture suite (`tests/unit/test_sec_fsds.py`) enforces:
+1. **Entity Coverage**: At least 50 distinct corporate CIKs.
+2. **Restatement Ground Truth**: At least 20 revision pairs detected across `2023q3` and `2023q4`.
+3. **Point-in-Time Integrity**: 0 point-in-time violations during historical `as_of` queries.
+4. **Symbol Resolution**: Mapped identifier share exceeding 95% against the fixture symbol master.
 
 ## 2. Symbol Master Reference
 
-### Provenance
-- `https://www.sec.gov/files/company_tickers.json`
-- Public domain corporate reference table published by the SEC.
-- The committed fixture (`tests/fixtures/symbols/company_tickers.json`) contains 200 verified corporate entities with `cik_str`, `ticker`, and `title`.
+- Source: `https://www.sec.gov/files/company_tickers.json` (SEC public domain).
+- Committed fixtures (`tests/fixtures/symbols/company_tickers.json` and `company_tickers_v2.json`) provide 200 corporate entries with `cik_str`, `ticker`, and `title`.
 
-## 3. Synthetic Benchmark Drops
+## 3. Synthetic Benchmark and Format Drops
 
-- Committed in `tests/fixtures/drops/` across CSV, JSON Lines, and Parquet formats.
-- Generated with deterministic seeds to verify baseline schema inference and planted faults.
+- `tests/fixtures/drops/`: Deterministic CSV, CSV.GZ, JSONL, JSONL.GZ, Parquet, multi-file, and corrupted-archive drops (`mtime=0` for gzip reproducibility).
+- `tests/fixtures/drift/`: Format-specific drops exercising schema drift classification (`added_column`, `removed_column`, `type_widened`, `type_narrowed`, `nullability_change`).

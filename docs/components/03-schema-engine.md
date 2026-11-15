@@ -2,101 +2,63 @@
 
 ## 1. Overview & Responsibility
 
-The `vdok.schema` module infers, pins, and verifies structural data contracts for vendor drops. Data providers frequently change payloads by renaming fields, modifying data types, or adding nullable fields without advance notification.
-
-`vdok.schema` prevents unexpected data corruption through a two-stage contract lifecycle:
-1. **Statistical Schema Inference**: Generates a strongly typed schema definition by sampling raw file contents.
-2. **Contract Pinning & Drift Guard**: Serializes the verified schema to `schemas/<vendor>.yaml` and compares every future drop against this contract, halting execution on breaking alterations.
+`vdok.schema` infers structural contracts from raw vendor drops, pins approved contracts to `schemas/<vendor>.yaml`, detects column and type drift on subsequent deliveries, and manages operator-approved contract upgrades.
 
 ---
 
-## 2. Statistical Schema Inference
+## 2. Statistical Schema Inference (`infer_schema`)
 
-### 2.1 Sampling Strategy
-To balance verification depth with execution speed on large datasets, the engine samples up to 200,000 rows per file.
-
-### 2.2 Inferred Data Types
-- `integer`: Signed 64-bit integer values (`int64`).
-- `decimal`: Exact fixed-point numeric representation (`decimal(38, 9)`). Floats are prohibited for monetary fields to prevent IEEE 754 precision loss.
-- `float`: General floating-point values for scientific measurements.
-- `string`: Textual strings and categorical codes.
-- `date`: Calendar dates formatted as `YYYY-MM-DD`.
-- `datetime`: Point-in-time timestamps with microsecond precision.
-- `boolean`: Binary truth values (`true`, `false`).
-
-### 2.3 Statistical Attributes Computed
-For each column, the inference engine computes:
-- Data type classification.
-- Nullability ratio (N_null / N_sample).
-- Approximate distinct values (HyperLogLog or exact count).
-- Numeric or temporal bounds: minimum and maximum values.
+- **Sampling**: Inspects up to `max_sample_rows` (default `200,000`) rows per file.
+- **Path-Safe Reading**: Uses DuckDB's programmatic relation API (`con.read_csv`, `con.read_json`) for text formats and PyArrow for Parquet so paths with quotes or spaces require no SQL string escaping.
+- **Inferred Types (`InferredType`)**: `integer`, `decimal`, `float`, `string`, `date`, `datetime`, `boolean`.
+- **Exact Monetary Typing**: Columns listed in manifest `value_columns` or matching monetary names (`_is_money_column`) enforce exact `decimal` inference with derived `(precision, scale)` instead of IEEE 754 `float`.
+- **Tolerant Cell-Anomaly Sampling**: On samples with `≥ 100` non-null values, if `≤ 1.0%` of sampled cells fail narrow numeric/date parsing, the narrow type is preserved so row-level validation routes the isolated corrupted cells to `quarantine.parquet` rather than triggering a false batch-level `type_widened` hold.
+- **Column Metadata (`ColumnSchema`)**: Stores `type`, `nullable`, `distinct_count`, `min`, `max`, `precision`, and `scale`.
 
 ---
 
-## 3. Pinned Contract Specification
+## 3. Pinned Contract Format (`VendorSchema`)
 
-Pinned schemas are written to `schemas/<vendor>.yaml` in human-readable YAML format:
+Pinned contracts reside at `schemas/<vendor>.yaml`:
 
 ```yaml
-vendor: sec_fsds
+vendor: synthetic
 version: 1
-pinned_at: "2024-01-15T12:00:00Z"
+pinned_at: "2026-11-10T13:25:37.107659+00:00"
 columns:
-  cik:
-    type: string
-    nullable: false
-    distinct_count: 520
-  tag:
-    type: string
-    nullable: false
-    distinct_count: 2450
-  version:
-    type: string
-    nullable: false
-  ddate:
-    type: date
-    nullable: false
-    min: "2020-01-01"
-    max: "2024-03-31"
-  qtrs:
+  record_id:
     type: integer
     nullable: false
-  uom:
+    distinct_count: 6316
+    min: 1000
+    max: 7315
+  entity_id:
     type: string
     nullable: false
-  value:
+  price:
     type: decimal
+    nullable: false
+    precision: 18
     scale: 4
-    precision: 28
-    nullable: true
 ```
 
 ---
 
-## 4. Schema Drift Classification
+## 4. Drift Classification (`compare_schemas` / `check_schema`)
 
-When a drop is onboarded against an existing pinned schema, the engine computes column-by-column diffs and classifies changes into three severity categories:
+Every incoming drop is compared column-by-column against the pinned contract:
 
-| Drift Category | Severity | Description | Operational Response |
+| `DriftCategory` | `DriftSeverity` | Condition | Operational Action |
 |---|---|---|---|
-| `removed_column` | `hold` | A column present in pinned schema is absent from drop | Halts drop immediately; writes to `held_drops` |
-| `type_widened` | `hold` | Data type expanded incompatibly (e.g., `integer` → `string`) | Halts drop immediately; writes to `held_drops` |
-| `added_column` | `warn` | A new column appears in drop that is not in pinned schema | Logs warning; ignores extra column or passes with notice |
-| `type_narrowed` | `warn` | Data type tightened compatibly (e.g., `float` → `integer`) | Logs warning; accepts drop |
-| `nullability_change` | `warn` | Column declared non-nullable now contains null values | Logs warning; routes affected rows to quarantine |
+| `removed_column` | `hold` | Column in pinned schema is missing from drop | Holds drop before store write |
+| `type_widened` | `hold` | Column type widened incompatibly (e.g., `integer` → `string`) | Holds drop before store write |
+| `added_column` | `warn` | New column present in drop not in pinned schema | Logs warning and proposed addition |
+| `type_narrowed` | `warn` | Column type narrowed compatibly (e.g., `float` → `integer`) | Logs warning and proposed narrowing |
+| `nullability_change` | `warn` | Non-nullable column contains null values | Logs warning; row rules handle nulls |
 
 ---
 
-## 5. Human-in-the-Loop Contract Updates
+## 5. Contract Lifecycle (`pin_schema`, `accept_schema_changes`)
 
-When legitimate vendor updates occur (such as a planned schema version release), operators review proposed changes in the readiness report and accept them via the CLI:
-
-```bash
-vdok schema accept sec_fsds
-```
-
-This command:
-1. Archives the previous contract version in storage table `schema_versions`.
-2. Increments the schema version number.
-3. Updates `schemas/<vendor>.yaml` with the updated column definitions.
-4. Allows previously held drops to proceed with re-validation.
+- **Initial Pinning**: First onboarding (or `vdok schema pin`) writes `schemas/<vendor>.yaml` at `version: 1`.
+- **Accepting Changes**: `vdok schema accept <vendor>` applies proposed differences from the latest drop (or `--drop-path`), increments `version`, updates `pinned_at`, and writes the updated YAML contract so legitimate vendor migrations can proceed.

@@ -2,111 +2,64 @@
 
 ## 1. Overview & Responsibility
 
-The `vdok.query` module provides point-in-time (PIT) retrieval interfaces and an automated leak detector. In quantitative investment research, look-ahead bias occurs when a strategy decision at historical time T_decision accesses information that was not publicly known until T_knowledge > T_decision.
-
-`vdok.query` enforces **Guarantee 2 (G2)**: queries evaluated as of timestamp T_as_of strictly ignore records published after that timestamp. An audit logger and leak detector verify that quantitative backtests maintain strict temporal causality.
+`vdok.query` implements the point-in-time query interface (`Store`), an unpruned streaming reference oracle (`BruteForceStore`), JSON Lines read audit logging (`AuditLogger`), and the look-ahead leak detector (`detect_leaks`). It enforces **Guarantee 2 (G2)**: queries evaluated at `as_of` never read or return observations with `knowledge_time > as_of`.
 
 ---
 
-## 2. Point-in-Time Query API
-
-The Python API exposes a `Store` query abstraction:
+## 2. Point-in-Time Query API (`Store`)
 
 ```python
-from datetime import datetime, timezone
-from decimal import Decimal
 from vdok.query import Store
 
-store = Store("data/store/sec_fsds")
-
-# Query single point-in-time value
-record = store.value(
-    entity_id="0000320193",
-    field="Revenues|USD|4Q",
-    event_time="2023-12-31",
-    as_of="2024-02-15T00:00:00Z",
-)
-
-# Query historical time series as of a specific vintage
-series = store.series(
-    entity_id="0000320193",
-    field="Revenues|USD|4Q",
-    as_of="2024-02-15T00:00:00Z",
-    start="2020-01-01",
-    end="2023-12-31",
-)
+with Store("data/store/sec_fsds", audit=True) as store:
+    record = store.value(
+        entity_id="0000320193",
+        field="Revenues|USD|4Q",
+        event_time="2023-12-31",
+        as_of="2024-02-15T00:00:00Z",
+    )
+    series = store.series(
+        entity_id="0000320193",
+        field="Revenues|USD|4Q",
+        as_of="2024-02-15T00:00:00Z",
+        start="2020-01-01",
+        end="2023-12-31",
+    )
 ```
+
+- `Store.value(...)` returns a `StoreRecord` (or `None`) for the greatest `(knowledge_time, drop_id)` with `knowledge_time ≤ as_of`, normalizing entity identifiers (including 10-digit CIK zero-padding lookup fallback).
+- `Store.series(...)` returns a chronologically ordered list of point-in-time `StoreRecord` entries across `[start, end]` as of `as_of`.
 
 ---
 
-## 3. Query Compilation & Vectorized Execution
+## 3. Sorted Partition MD5 Prefix Index & Reference Oracle
 
-Queries filter partition files directly via DuckDB without pre-loading entire datasets into Python memory.
+### 3.1 Indexed Partition Lookup (`_PartitionIndex`)
+To support sub-millisecond `Store.value()` lookups at 100,000-query benchmark scale while remaining within memory budgets:
+- `Store` loads each `(field_bucket, event_year)` partition on demand into an Arrow table sorted by `(_k64 ASC, knowledge_time DESC, drop_id DESC)`, where `_k64` is the leading 64-bit unsigned integer of `md5(entity_id || '\0' || field || '\0' || epoch_us(event_time))`.
+- Partition tables are cached in memory up to 256 partitions / 2 GiB (`_MAX_CACHED_BYTES`), invalidated automatically if partition file sizes change.
+- Lookups run `bisect_left` over zero-copy Arrow scalar `memoryview` buffers (`k64_mv`, `ev_mv`, `kt_mv`), returning the first matching row with `knowledge_time ≤ as_of`.
+- All DuckDB-to-Python materialization uses `.to_arrow_table()` so UTC `zoneinfo` timestamps work without `pytz`.
 
-### 3.1 Point Query Window Execution
-To resolve the authoritative observation for key `(entity_id, field, event_time)` known as of `as_of`:
-
-```sql
-SELECT entity_id, field, event_time, knowledge_time, value_num, value_str, unit
-FROM (
-    SELECT *,
-           ROW_NUMBER() OVER (
-               PARTITION BY entity_id, field, event_time
-               ORDER BY knowledge_time DESC, drop_id DESC
-           ) AS rank_idx
-    FROM read_parquet('data/store/sec_fsds/**/*.parquet')
-    WHERE entity_id = ?
-      AND field = ?
-      AND event_time = ?
-      AND knowledge_time <= ?
-)
-WHERE rank_idx = 1;
-```
-
-### 3.2 Guarantee 2 (G2) Verification
-The automated test suite verifies G2 by:
-1. Ingesting drop 1 where entity E has value V_1 known at T_1.
-2. Ingesting drop 2 where entity E is restated to value V_2 known at T_2 (where T_2 > T_1).
-3. Executing `store.value(..., as_of=T_1)` and asserting that the returned value is exactly V_1.
-4. Executing `store.value(..., as_of=T_2)` and asserting that the returned value is V_2.
+### 3.2 Unpruned Reference Oracle (`BruteForceStore`)
+`BruteForceStore.batch_values_unpruned` streams every `part-*.parquet` file across all buckets and years via PyArrow `ParquetFile.iter_batches` with zero directory pruning, zero SQL, and zero hash indexing. Automated tests and benchmarks assert 0 mismatches between `Store` and `BruteForceStore`.
 
 ---
 
-## 4. Audit Logging & Leak Detection Engine
+## 4. Audit Logging & Leak Detection (`AuditLogger` & `detect_leaks`)
 
-When researchers execute strategy backtests, subtle bugs can inadvertently set `as_of` forward in time or evaluate trading signals using future knowledge dates.
+When `Store(..., audit=True)` is active, reads append JSON Lines records to `<store_path>/audit/query_audit.jsonl` (or a custom `audit_log_path`):
 
-### 4.1 Audit Logging
-Initializing `Store(audit=True)` records every read operation to an audit log file:
-```
-data/audit/query_audit_<session>.jsonl
-```
-
-Each log line contains:
 ```json
 {
-  "session_id": "8f9a2e3b",
-  "decision_time": "2024-01-01T09:30:00Z",
-  "as_of": "2024-01-01T09:30:00Z",
-  "entity_id": "0000320193",
-  "field": "Revenues|USD|4Q",
-  "event_time": "2023-09-30T00:00:00Z",
-  "knowledge_time_returned": "2023-11-03T16:05:00Z",
-  "row_hash": "4c8f..."
+  "decision_time": "2024-01-01T09:30:00+00:00",
+  "as_of": "2024-01-01T09:30:00+00:00",
+  "key": "0000320193|Revenues|USD|4Q|2023-09-30T00:00:00+00:00",
+  "knowledge_time_returned": "2023-11-03T16:05:00+00:00",
+  "query_type": "value"
 }
 ```
 
-### 4.2 Leak Detection Analysis (`vdok leaks`)
-The `vdok leaks` command audits query logs against model decision timestamps:
-
-```bash
-vdok leaks --log data/audit/query_audit.jsonl --decision-time-column decision_time
-```
-
-The leak detector identifies two categories of temporal violations:
-1. **As-Of Leakage**: A query where the caller requested data with an `as_of` timestamp situated in the future relative to the trading decision:
-   `T_as_of > T_decision`
-2. **Knowledge Leakage**: A condition where the record returned by the store carries a publication timestamp exceeding the decision timestamp:
-   `T_knowledge_returned > T_decision`
-
-Any detected violation produces a detailed incident report pinpointing the source line, query parameters, and timestamp discrepancy.
+`detect_leaks(log_path, decision_time_column="decision_time")` (exposed via `vdok leaks`) scans the log and reports `LeakReport` counts for two violation types:
+1. **As-Of Leaks**: `as_of > decision_time`.
+2. **Knowledge Leaks**: `knowledge_time_returned > decision_time`.

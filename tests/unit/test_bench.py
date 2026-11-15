@@ -11,7 +11,7 @@ from bench.run import main, parse_workload_label, purge_tree, run_benchmark
 
 
 def test_hardware_info_and_block() -> None:
-    """Verify hardware profiler captures all Section 8 environment attributes."""
+    """Verify hardware profiler captures all required environment attributes."""
     info = get_hardware_info()
     expected_keys = {
         "CPU Model",

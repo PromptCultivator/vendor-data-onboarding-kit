@@ -4,9 +4,9 @@ Verifies:
 1. Normalization of SEC FSDS tabular datasets to canonical Arrow schemas.
 2. Handling of coreg subsidiaries with '|coreg=<name>' suffixing.
 3. Support for direct ZIP archive normalization.
-4. Revision detection across consecutive quarters (SPEC Section 7: >= 20 revisions).
-5. Zero point-in-time violations during bitemporal queries (SPEC G2).
-6. Symbol master mapping rate exceeding 95% threshold (SPEC Section 7).
+4. Revision detection across consecutive quarters (>= 20 revisions).
+5. Zero point-in-time violations during bitemporal queries (Guarantee G2).
+6. Symbol master mapping rate exceeding 95% threshold.
 7. Rate limiter enforcement (at most 5 requests per second).
 8. User-Agent formatting and environment variable configuration.
 9. File download caching and SHA-256 digest validation.
@@ -133,7 +133,7 @@ def test_sec_fsds_zip_archive_normalization(tmp_path: Path) -> None:
 
 
 def test_sec_fsds_revisions_across_quarters(tmp_path: Path) -> None:
-    """Verify onboarding consecutive quarters detects >= 20 revisions (SPEC Section 7)."""
+    """Verify onboarding consecutive quarters detects >= 20 revisions."""
     store_dir = tmp_path / "store"
     results_dir = tmp_path / "results"
 
@@ -171,7 +171,7 @@ def test_sec_fsds_revisions_across_quarters(tmp_path: Path) -> None:
 
 
 def test_sec_fsds_zero_point_in_time_violations(tmp_path: Path) -> None:
-    """Verify point-in-time correctness returns 0 violations on restated facts (SPEC G2)."""
+    """Verify point-in-time correctness returns 0 violations on restated facts (Guarantee G2)."""
     store_dir = tmp_path / "store"
     results_dir = tmp_path / "results"
 
@@ -233,7 +233,7 @@ def test_sec_fsds_zero_point_in_time_violations(tmp_path: Path) -> None:
 
 
 def test_sec_fsds_symbol_mapping_share(tmp_path: Path) -> None:
-    """Verify mapped entity share exceeds 95% threshold (SPEC Section 7)."""
+    """Verify mapped entity share exceeds 95% threshold."""
     manifest = VendorManifest.from_yaml(MANIFEST_PATH.read_text(encoding="utf-8"))
     from vdok.symbols import build_symbol_master
 

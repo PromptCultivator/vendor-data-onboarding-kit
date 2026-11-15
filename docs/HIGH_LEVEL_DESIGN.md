@@ -2,139 +2,134 @@
 
 ## 1. Executive Summary
 
-`vendor-data-onboarding-kit` (`vdok`) is a research infrastructure and market data platform designed for quantitative investment management. The system automates the ingestion, validation, normalization, and bitemporal storage of heterogeneous vendor datasets (such as SEC financial statement filings, economic data releases, and alternative data feeds).
+`vendor-data-onboarding-kit` (`vdok`) is a local-first market and fundamental data onboarding platform for quantitative research. It ingests raw vendor feeds (CSV, JSON Lines, Parquet, and SEC Financial Statement Data Sets archives), enforces pinned schema contracts, normalizes records into an immutable bitemporal Parquet store, captures historical restatements in a revision ledger, emits deterministic vendor readiness reports, and audits point-in-time reads for look-ahead bias.
 
-Quantitative research pipelines often suffer from data integrity failures:
-1. **Unannounced Schema Modifications**: Vendors alter column names, add fields, or alter data representations without prior notification.
-2. **Identifier Instability**: Ticker symbols change during corporate reorganizations, acquisitions, and ticker reassignments, causing survivor bias.
-3. **Silent Historical Restatements**: Financial and macroeconomic metrics undergo retroactive revision without notification, leading to look-ahead bias if historical records are modified in place.
-4. **Data Quality Degradation**: Missing records, corrupted values, duplicate entries, or non-monotonic timestamps degrade model training and execution.
+Quantitative research pipelines fail on raw vendor data for four main reasons:
+1. **Unannounced Schema Modifications**: Vendors add, drop, or widen columns without notice.
+2. **Identifier Instability**: Corporate actions, exchange suffixes, and ticker reuse cause mismatched joins or survivorship bias.
+3. **Silent Historical Restatements**: Retroactive updates overwrite prior values unless every vintage is preserved with its publication timestamp.
+4. **Data Quality Degradation**: Corrupted cells, duplicate keys, unit shifts, or truncated drops propagate silently when not isolated before storage.
 
-`vdok` addresses these operational risks through an append-only architecture that enforces immutable records, verifies strict point-in-time temporal consistency, isolates anomalies using multi-tier severity routing, and emits deterministic readiness reports.
+`vdok` addresses these risks with physical append-only storage, strict point-in-time query isolation, drop idempotency, multi-tier severity routing, and deterministic readiness reporting.
 
 ---
 
 ## 2. Core Guarantees
 
-The architecture enforces three structural guarantees verified by automated test suites:
+Three structural invariants are enforced by the runtime and verified by named automated tests in [tests/unit/test_guarantees.py](../../tests/unit/test_guarantees.py):
 
-- **Guarantee 1 (G1) — Append-Only Physical Storage**: The underlying data store operates without update or delete operations. Incoming data files are written once. Re-writing to an existing partition is rejected.
-- **Guarantee 2 (G2) — Strict Point-in-Time Isolation**: Queries evaluated as of historical knowledge timestamp K never expose values whose visibility timestamp occurred after K. This eliminates look-ahead bias in backtesting.
-- **Guarantee 3 (G3) — Drop Ingestion Idempotency**: Processing an identical drop repeatedly results in a no-operation state without duplicating rows or creating redundant storage files.
+- **Guarantee 1 (G1) — Append-Only Physical Storage** (`test_g1_store_is_append_only`): Partition files are written once and locked read-only (`0o444`). There is no update or delete path; attempting to write an existing `drop_id` raises `AppendOnlyViolationError`.
+- **Guarantee 2 (G2) — Strict Point-in-Time Isolation** (`test_g2_pit_never_reads_future_knowledge`): Point-in-time queries evaluated at `as_of` never read or return records whose `knowledge_time > as_of`, verified against an unpruned streaming reference oracle (`BruteForceStore`).
+- **Guarantee 3 (G3) — Drop Ingestion Idempotency** (`test_g3_rerun_same_drop_adds_no_rows`): Re-onboarding an identical payload (`drop_id` derived from sorted uncompressed file SHA-256 hashes) is detected before store writes and returns the existing drop metadata without adding rows.
 
 ---
 
-## 3. High-Level Architecture & End-to-End Pipeline
+## 3. End-to-End Pipeline
 
 ```
-Raw Vendor Drop (CSV, JSON Lines, Parquet)
+Raw Vendor Drop (CSV, CSV.GZ, JSONL, JSONL.GZ, Parquet, SEC FSDS)
                     │
                     ▼
        [1. Discovery & Fingerprint]
-      - SHA-256 Digest & Drop ID
-      - Format & Compression Inspection
+      - Magic-byte & JSONL-first format inspection
+      - Uncompressed payload SHA-256 & 16-hex drop_id
                     │
                     ▼
        [2. Schema & Contract Guard]
-      - Statistical Type Sampling
-      - Pinned YAML Contract
-      - Breaking Drift Classification
+      - 200,000-row statistical sampling (DuckDB relation API)
+      - Pinned YAML contract comparison & drift severity
                     │
                     ▼
       [3. Symbology & Normalization]
-      - Interval-Aware Identifier Resolution
-      - Unmapped Identifier Quarantine
-      - Canonical Decimal & UTC Normalization
+      - Hash-versioned rule-based identifier mapping
+      - Strict fixed-point Decimal & UTC microsecond parsing
                     │
                     ▼
          [4. Validation Engine]
-      - DuckDB Vectorized Rule Evaluation
-      - Row-Level Quarantine Routing
-      - Batch-Level Hold Enforcement
+      - Vectorized DuckDB SQL rule evaluation
+      - Multi-reason row quarantine & batch hold checks
                     │
         ┌───────────┴───────────┐
         ▼                       ▼
    Batch HELD           Batch ACCEPTED
-  (Store Halts)                 │
+ (held_drops.parquet)           │
                     ┌───────────┴───────────┐
                     ▼                       ▼
         [5. Append-Only Store]     [6. Revision Ledger]
-       - Partitioned Parquet      - Drop N vs N-1 Diffing
-       - Write-Once Immutability  - Restatement Extraction
+       - Bucketed Parquet (0o444) - Windowed prior-latest diff
+       - DuckDB catalog views     - Metadata revisions.parquet
                     │                       │
                     └───────────┬───────────┘
                                 ▼
                    [7. Readiness Reporting]
-                  - Coverage Matrix & Gaps
-                  - Validation Anomaly Audit
-                  - Template-Driven Inquiries
+                  - Verdict (READY / WARNINGS / HELD)
+                  - Coverage, anomalies, deterministic inquiries
                                 │
                                 ▼
                  [8. PIT Query & Leak Auditing]
-                - As-Of Historical Queries
-                - Decision-Time Leak Detection
+                - Sorted _k64 MD5 partition index
+                - JSONL query audit & leak detection
 ```
 
 ---
 
 ## 4. Canonical Bitemporal Data Model
 
-Every ingested record is transformed into a standardized bitemporal representation. This model explicitly separates the event timestamp (when an economic phenomenon occurred) from the knowledge timestamp (when the observation was published and accessible).
+Every normalized record conforms to `CANONICAL_ARROW_SCHEMA` (13 fields: 12 canonical columns plus `unmapped`), separating `event_time` (the period described) from `knowledge_time` (when the value became known).
 
-### Schema Specification
-
-| Column | Type | Description |
+| Column | Arrow Type | Description |
 |---|---|---|
-| `entity_id` | `string` | Canonical identifier from the symbol master, or raw identifier if unresolved |
+| `entity_id` | `string` | Canonical identifier from the symbol master, or normalized raw ID if unresolved |
 | `entity_id_type` | `string` | Identifier standard (`cik`, `ticker`, `isin`, `cusip`, `vendor_id`) |
-| `field` | `string` | Metric name joined from field columns (e.g., `Revenues\|USD\|4Q`) |
-| `event_time` | `timestamp[us, UTC]` | Period end date or observation time |
-| `knowledge_time` | `timestamp[us, UTC]` | Timestamp when the data became visible to market participants |
-| `value_num` | `decimal128(38, 9)` | Exact decimal representation for monetary and numeric quantities |
-| `value_str` | `string` | Textual state or categorical value (null when numeric) |
-| `unit` | `string` | Standardized unit code (`USD`, `shares`, `ratio`, `pure`) |
-| `drop_id` | `string` | Hexadecimal SHA-256 prefix identifying the source drop batch |
-| `source_file` | `string` | Relative path of the raw file within the drop |
-| `source_row` | `int64` | One-based row index in the raw file |
-| `row_hash` | `string` | Cryptographic SHA-256 fingerprint of the normalized values |
+| `field` | `string` | Metric identifier joined with `\|` (e.g., `Revenues\|USD\|4Q`) |
+| `event_time` | `timestamp[us, UTC]` | Period end date or observation timestamp |
+| `knowledge_time` | `timestamp[us, UTC]` | Filing acceptance timestamp or batch drop receipt timestamp |
+| `value_num` | `decimal128(38, 9)` | Exact fixed-point numeric value (null for non-numeric rows) |
+| `value_str` | `string` | Textual or categorical value (null for numeric rows) |
+| `unit` | `string` | Standardized unit (`USD`, `shares`, `ratio`, `pure`) |
+| `drop_id` | `string` | 16-character hexadecimal prefix of sorted uncompressed file digests |
+| `source_file` | `string` | Relative source file path within the drop |
+| `source_row` | `int64` | One-based source row index |
+| `row_hash` | `string` | SHA-256 digest over null-byte (`\0`) delimited canonical fields |
+| `unmapped` | `bool` | `true` when identifier resolution found no symbol master match |
 
 ---
 
 ## 5. Subsystem Breakdown
 
-The platform consists of twelve modular subsystems located in the `vdok/` package:
+All core modules reside in `vdok/`:
 
 ```
 vdok/
 ├── __init__.py           # Package version and exports
-├── cli.py                # Command-line interface orchestration
-├── manifest.py           # Declarative vendor configuration parser
-├── discover.py           # Drop scanner and cryptographic fingerprinting
-├── schema.py             # Schema inference, contract pinning, and drift detection
-├── normalize.py          # Row canonicalization and deterministic parsing
-├── symbols.py            # Point-in-time symbology master and identifier resolution
-├── validate.py           # Vectorized rule engine and multi-tier severity execution
-├── store.py              # Partitioned Parquet bitemporal store and DuckDB catalog
-├── revisions.py          # Drop-over-drop diffing and restatement ledger
-├── query.py              # Zero-bias point-in-time query engine and leak auditor
-├── report.py             # Readiness scorecard and vendor inquiry generator
+├── cli.py                # Typer CLI application (`vdok`)
+├── manifest.py           # VendorManifest Pydantic v2 model and IANA timezone validator
+├── discover.py           # Format detection, decompression safety, drop_id hashing
+├── schema.py             # Sampling inference, YAML pinning, tolerant drift classification
+├── normalize.py          # Canonical Arrow/Pydantic models, pure & vectorized normalizers
+├── symbols.py            # Content-hash-versioned Parquet symbol master & deterministic mapping
+├── validate.py           # DuckDB SQL rule compiler and multi-tier severity engine
+├── store.py              # Bucketed Parquet writer, 0o444 locking, DuckDB catalog sync
+├── revisions.py          # Windowed restatement detection and revision ledger
+├── query.py              # Partition-indexed PIT Store, BruteForceStore oracle, leak detector
+├── report.py             # Readiness report compiler (MD + JSON), inquiry templates, drop diff
+├── onboard.py            # Pipeline orchestrator coordinating all stages
 └── adapters/
-    ├── sec_fsds.py       # SEC Financial Statement Data Sets relational loader
-    ├── synthetic.py      # Fault-injected synthetic benchmark dataset generator
-    └── alfred.py         # St. Louis Fed FRED/ALFRED vintage time-series adapter
+    ├── sec_fsds.py       # SEC FSDS rate-limited downloader, caching, SQL normalizer
+    └── synthetic.py      # Seeded multi-drop generator with planted fault suites
 ```
 
-### Component Documentation Directory
-Detailed engineering documentation for each subsystem is provided in `docs/components/`:
+### Component Documentation
+
 - [01 - Vendor Manifest Model](components/01-manifest.md)
-- [02 - Drop Discovery & Fingerprint](components/02-discovery.md)
+- [02 - Drop Discovery & Fingerprinting](components/02-discovery.md)
 - [03 - Schema Engine & Drift Guard](components/03-schema-engine.md)
 - [04 - Canonical Normalization](components/04-normalization.md)
-- [05 - Symbology Master](components/05-symbology.md)
+- [05 - Symbol Master & Resolution](components/05-symbology.md)
 - [06 - Validation & Severity Routing](components/06-validation.md)
 - [07 - Append-Only Bitemporal Store](components/07-bitemporal-store.md)
 - [08 - Revision Ledger & Diffing](components/08-revision-ledger.md)
-- [09 - PIT Query & Leak Detector](components/09-query-engine-leak-detector.md)
+- [09 - PIT Query Engine & Leak Detector](components/09-query-engine-leak-detector.md)
 - [10 - Readiness Reporting & Vendor Inquiries](components/10-readiness-report.md)
 - [11 - Ingestion Adapters](components/11-adapters.md)
 - [12 - CLI Workflows & Tooling](components/12-cli.md)
@@ -143,79 +138,56 @@ Detailed engineering documentation for each subsystem is provided in `docs/compo
 
 ## 6. Multi-Tier Severity Routing
 
-Data validation applies severity tiers to prevent corrupted data from entering research datasets while maintaining throughput for valid observations:
+Validation compiles declarative YAML rules into single-pass DuckDB SQL and separates row-level defects from batch-level structural failures:
 
 | Severity Tier | Scope | Operational Response | Target Artifact |
 |---|---|---|---|
-| `warn` | Row | Logged in validation metrics; record continues through pipeline | Readiness Report |
-| `quarantine` | Row | Record extracted from analytical ingestion flow | `quarantine.parquet` |
-| `hold` | Batch | Ingestion halted immediately; zero records written to storage | `held_drops` ledger |
-
-### Severity Routing Logic
-- **Row-Level Rules**: Missing mandatory fields, range violations, invalid enum codes, non-monotonic timestamps per entity, or future-dated events send individual records to `quarantine.parquet` annotated with rejection reasons.
-- **Batch-Level Rules**: Structural schema discrepancies (column removal, type widening), abnormal drop size contractions (< 0.5× or > 2.0× trailing median), excessive duplicate ratios (> 1%), or unexpected multi-period coverage dropouts place the entire drop in `hold` status.
+| `warn` | Row / Schema | Logged in metrics; rows continue to store | Readiness Report |
+| `quarantine` | Row | Rows diverted with `quarantine_reasons` list; conforming rows proceed | `quarantine/part-<drop_id>.parquet` |
+| `hold` | Batch | Ingestion aborts before store write; zero partition files written | `metadata/held_drops.parquet` |
 
 ---
 
 ## 7. Storage Layout & Partitioning
 
-The storage hierarchy organizes data files by vendor, field grouping, and event year:
-
 ```
 data/store/<vendor>/
-├── store.duckdb                 # Relational catalog views and drop tracking
+├── store.duckdb                           # DuckDB catalog views and metadata tables
 ├── <field_bucket>/
 │   └── <event_year>/
-│       ├── part-<drop_id_1>.parquet
+│       ├── part-<drop_id_1>.parquet       # Immutable 0o444 data partition
 │       └── part-<drop_id_2>.parquet
 ├── quarantine/
-│   └── part-<drop_id>.parquet   # Quarantined rows with error reason arrays
+│   └── part-<drop_id>.parquet             # Quarantined rows with quarantine_reasons
+├── audit/
+│   └── query_audit.jsonl                  # Optional PIT read audit log
 └── metadata/
-    ├── drops.parquet            # Ingestion audit log
-    ├── held_drops.parquet       # Held drop records and failure reasons
-    ├── schema_versions.parquet  # Pinned contract lineage
-    └── revisions.parquet        # Historical value modification ledger
+    ├── drops.parquet                      # Committed drop log
+    ├── held_drops.parquet                 # Held drop records and hold reasons
+    ├── schema_versions.parquet            # Schema version lineage
+    └── revisions.parquet                  # Cross-drop restatement ledger
 ```
-
-File permissions are restricted to read-only (`0o444`) immediately following completion of disk writes to prevent accidental modification or truncation.
 
 ---
 
 ## 8. Point-in-Time Query Mechanics
 
-Point-in-time evaluation resolves the most recent observation known at or prior to historical timestamp T_as_of:
+For a logical key `(entity_id, field, event_time)` and cutoff `as_of`, the query engine resolves:
 
 ```
-value(E, F, T_event, T_as_of) = latest record where knowledge_time ≤ T_as_of
+value(E, F, T_event, T_as_of) = record with greatest (knowledge_time, drop_id) where knowledge_time ≤ T_as_of
 ```
 
-This query is compiled into vectorized DuckDB SQL execution:
-
-```sql
-SELECT entity_id, field, event_time, knowledge_time, value_num, value_str, unit
-FROM (
-    SELECT *,
-           ROW_NUMBER() OVER (
-               PARTITION BY entity_id, field, event_time
-               ORDER BY knowledge_time DESC, drop_id DESC
-           ) AS rank_idx
-    FROM read_parquet('data/store/sec_fsds/**/*.parquet')
-    WHERE entity_id = '0000320193'
-      AND field = 'Revenues|USD|4Q'
-      AND event_time = '2023-12-31'
-      AND knowledge_time <= '2024-02-15 00:00:00'
-)
-WHERE rank_idx = 1;
-```
+Rather than executing a full-table DuckDB scan per lookup, `Store` caches per-partition `(field_bucket, event_year)` Arrow tables sorted by `(_k64 ASC, knowledge_time DESC, drop_id DESC)`, where `_k64` is the leading 64 bits of `md5(entity_id || '\0' || field || '\0' || epoch_us(event_time))`. Lookups execute `bisect_left` over zero-copy `memoryview` scalar buffers within a 2 GiB / 256-partition cache budget. Correctness is verified in tests and benchmarks against `BruteForceStore.batch_values_unpruned`, which streams all Parquet files with PyArrow without pruning or indexing.
 
 ---
 
-## 9. Design Decisions & Trade-Offs
+## 9. Architectural Decisions
 
-Key architecture decisions recorded in `docs/adr/`:
+Key architectural trade-offs are captured in [docs/adr/](adr) and detailed implementation choices (`D-001`–`D-030`) are cataloged in [docs/DECISIONS.md](DECISIONS.md):
 
-1. **ADR 001: Bitemporal Append-Only Architecture**: Values are never modified in place; each vintage is stored with its knowledge timestamp. Optimizes point-in-time reproducibility; costs additional storage capacity and bitemporal query indexing.
-2. **ADR 002: Multi-Tier Severity Routing**: Differentiates row-level warnings and quarantine from batch-level holds. Optimizes operational availability of valid records; costs separate quarantine storage maintenance.
-3. **ADR 003: Schema Pinning & Approval Workflow**: Schemas are inferred from samples and pinned as explicit contracts. Drift requires human review. Optimizes early detection of vendor modifications; costs manual approval intervention.
-4. **ADR 004: Local-First Embedded DuckDB & Parquet**: Single-node file-based storage using columnar Parquet files and DuckDB views. Optimizes execution reproducibility without cloud service dependencies; defers distributed multi-node coordination.
-5. **ADR 005: Deterministic Model-Free Identifier Mapping**: Rule-based resolution using versioned SEC ticker cross-references. Unresolved symbols are quarantined. Optimizes auditability and prevents false match propagation; costs unmapped entity queue management.
+1. **ADR 001 — Bitemporal Append-Only Store**: Preserves all vintages with `knowledge_time`; eliminates look-ahead bias at a measured `0.580×`–`0.585×` Parquet storage factor relative to raw drops.
+2. **ADR 002 — Severity Tiers (`warn`, `quarantine`, `hold`)**: Keeps conforming data flowing (`96.75%` admitted on SEC `2023q3`) while isolating bad rows and halting structural failures.
+3. **ADR 003 — Schema Pinning & Drift Guard**: Infers and pins YAML contracts with `≤ 1.0%` cell-anomaly tolerance on `≥ 100`-row samples and requires explicit `vdok schema accept` approval for structural migrations.
+4. **ADR 004 — Local-First DuckDB & Parquet**: Single-process local execution with embedded DuckDB and Parquet partitions; defers distributed multi-node storage and cloud object-store consistency.
+5. **ADR 005 — Model-Free Identifier Mapping**: Deterministic CIK/ticker/title matching against a hash-versioned SEC master with explicit `unmapped` flags; eliminates silent fuzzy-join corruption.

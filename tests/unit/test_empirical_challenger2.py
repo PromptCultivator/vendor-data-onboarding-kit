@@ -1,12 +1,12 @@
 """Empirical stress tests for DuckDB rule compiler, severity routing, and invariants.
 
-Created by Challenger 2 to stress-test:
+Stress tests covering:
 1. Simultaneous multiple row failures in a single quarantine_reasons array.
 2. Decimal scale boundaries (2, 4, 9, 10 decimals) without floating-point conversion.
 3. Temporal bounds (1989-12-31, 1990-01-01, drop_time + 1d, drop_time + 2d).
 4. Batch volume boundaries (0.49x, 0.50x, 2.00x, 2.01x of trailing 7-drop median).
 5. Coverage gaps across daily, monthly, and quarterly calendars.
-6. Section 12 prohibited vocabulary verification.
+6. Prohibited vocabulary verification across project code and documentation.
 """
 
 from __future__ import annotations
@@ -597,7 +597,7 @@ def test_coverage_gaps_daily_monthly_quarterly() -> None:
 
 
 def test_section_12_prohibited_vocabulary_absence() -> None:
-    """Verify Section 12 prohibited vocabulary is absent from all project code and docs."""
+    """Verify prohibited vocabulary is absent from all project code and docs."""
     banned = re.compile(
         r"\b(simply|robust|seamless|best|optimal|clean|minimal|powerful|cutting-edge)\b",
         re.IGNORECASE,
@@ -605,7 +605,6 @@ def test_section_12_prohibited_vocabulary_absence() -> None:
     violations: list[str] = []
 
     this_file = Path(__file__).resolve()
-    spec_file = Path("docs/SPEC.md").resolve()
     scan_dirs = [
         ".github",
         "vdok",
@@ -625,7 +624,7 @@ def test_section_12_prohibited_vocabulary_absence() -> None:
         for p in root_path.rglob("*"):
             if (
                 p.is_file()
-                and p.resolve() not in (this_file, spec_file)
+                and p.resolve() != this_file
                 and p.suffix in (".py", ".yaml", ".yml", ".md", ".csv")
             ):
                 text = p.read_text(encoding="utf-8", errors="ignore")
@@ -661,7 +660,7 @@ def test_markdown_uses_unicode_not_latex_math() -> None:
     for root_dir in ["docs", "bench", "tests"]:
         rp = Path(root_dir)
         if rp.exists():
-            md_files.extend(p for p in rp.rglob("*.md") if p.name != "SPEC.md")
+            md_files.extend(rp.rglob("*.md"))
 
     for md_path in sorted(set(md_files)):
         in_fence = False

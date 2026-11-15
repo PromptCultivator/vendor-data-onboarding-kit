@@ -2,123 +2,33 @@
 
 ## 1. Overview & Responsibility
 
-The `vdok.validate` module verifies data correctness, completeness, and consistency before records reach permanent storage. Raw vendor data contains various defects, including transmission truncation, duplicated records, impossible values (such as negative trading volumes), and invalid date sequences.
-
-To manage these defects effectively, `vdok.validate` applies a **multi-tier severity architecture**:
-- `warn`: Logs validation anomalies for operational tracking; valid records continue through ingestion.
-- `quarantine`: Isolates defective records into a separate Parquet file without stopping the rest of the batch.
-- `hold`: Immediately halts drop ingestion prior to storage writes when systematic corruption is detected.
-
-All validation rules are defined declaratively in `rules/<vendor>.yaml` and compiled into vectorized DuckDB SQL queries executed over the dataset in a single evaluation pass.
+`vdok.validate` compiles declarative vendor rules (`rules/<vendor>.yaml`) into vectorized DuckDB SQL and routes data quality defects across three severity tiers (`warn`, `quarantine`, `hold`).
 
 ---
 
-## 2. Rule Configuration Specification
+## 2. Rule Definitions (`RuleDefinition` & `RuleCheckType`)
 
-Rules are declared in YAML:
-
-```yaml
-rules:
-  # Row-level rules
-  - name: non_null_entity
-    check: not_null
-    column: entity_id
-    severity: quarantine
-
-  - name: non_negative_revenue
-    check: range
-    column: value_num
-    filter: "field LIKE 'Revenues%'"
-    min: 0
-    severity: warn
-
-  - name: plausible_event_time
-    check: temporal_bounds
-    column: event_time
-    min: "1990-01-01"
-    max: "now + 1 day"
-    severity: quarantine
-
-  - name: valid_unit_of_measure
-    check: allowed_values
-    column: unit
-    values: ["USD", "shares", "ratio", "pure"]
-    severity: quarantine
-
-  # Batch-level rules
-  - name: volume_stability
-    check: batch_volume
-    ratio_min: 0.5
-    ratio_max: 2.0
-    trailing_drops: 7
-    severity: hold
-
-  - name: duplicate_threshold
-    check: batch_duplicate_ratio
-    max_ratio: 0.01
-    severity: hold
-```
+- **Row-Level Checks**:
+  - `not_null`: Mandatory column must be non-null (used e.g. for `type_flip` when non-numeric input leaves `value_num` null).
+  - `range`: Numeric bounds (`min`, `max`, `min_inclusive`, `max_inclusive`) with optional SQL `filter`.
+  - `allowed_values` / `allowed_units`: Set membership checks.
+  - `regex_pattern`: Regular expression matching via DuckDB `regexp_matches`.
+  - `decimal_scale`: Exact fixed-point check `({col} IS NOT NULL AND ROUND({col}, {scale}) != {col})` without floating-point coercion.
+  - `temporal_bounds`: Verifies `event_time` lies within `[1990-01-01, drop_time + 1 day]`.
+  - `temporal_order`: Enforces `knowledge_time ≥ event_time` for post-event reporting feeds.
+  - `sql_expression`: Custom boolean SQL predicate.
+- **Batch-Level Checks**:
+  - `schema_drift`: Holds batch when `removed_column` or `type_widened` drift occurs.
+  - `batch_volume`: Holds batch when row count falls outside `[0.5, 2.0] ×` trailing 7-drop median (first drop exempt).
+  - `batch_duplicate_ratio`: Evaluates key `(entity_id, field, event_time, knowledge_time)` duplicate share (`max_ratio = 0.01`); quarantines duplicates when `≤ 1.0%` and holds the batch when `> 1.0%`.
+  - `byte_identical`: Holds drop if identical file hash sequence matches the immediate predecessor drop.
+  - `coverage_gap`: Evaluates missing expected calendar periods on conforming rows after row-level quarantine filtering.
 
 ---
 
-## 3. Row-Level Rules & Quarantine Routing
+## 3. Single-Pass Vectorized Execution (`RuleCompiler` & `ValidationEngine`)
 
-Row-level rules identify invalid records without interrupting the processing of valid data:
-
-1. **Not Null Checks**: Verifies mandatory fields (`entity_id`, `field`, `event_time`, `knowledge_time`).
-2. **Value Domain & Range Bounds**: Asserts numeric values fall within expected economic intervals (e.g., share counts > 0).
-3. **Allowed Unit of Measure**: Confirms units belong to the recognized financial unit registry.
-4. **Monotone Timestamps**: Checks that observations for a given entity follow non-decreasing event time order.
-5. **Future Observation Guard**: Enforces that event time does not extend beyond knowledge time when the vendor reports historical events after publication.
-
-### Quarantine Record Format
-Quarantined records are written to `store/<vendor>/quarantine/part-<drop_id>.parquet`:
-```
-canonical_row_data...                   # All canonical columns
-quarantine_reasons: list[string]        # Identifiers of failed rules
-quarantined_at:     timestamp[us, UTC]  # Execution timestamp
-```
-
----
-
-## 4. Batch-Level Rules & Hold Execution
-
-Batch-level rules evaluate drop-wide aggregate metrics. When a batch rule fails, the entire drop is classified as `HELD`:
-- **No data files are written to the partitioned store.**
-- A single record is inserted into the `held_drops` metadata table detailing the failure reason.
-- The readiness report assigns a `HELD` verdict, preventing downstream systems from consuming incomplete or corrupted data.
-
-### 4.1 Batch Volume Variance Check
-To detect partial file transmissions or truncated extracts, the row count N_current is compared against the trailing median of the prior 7 completed drops:
-
-```
-0.5 × median(N_{t-7}, ..., N_{t-1}) ≤ N_current ≤ 2.0 × median(N_{t-7}, ..., N_{t-1})
-```
-
-Drops falling outside this boundary are placed on hold (initial drops are exempt).
-
-### 4.2 Duplicate Ratio Escalation
-Duplicate observations sharing the same primary key `(entity_id, field, event_time, knowledge_time)` are evaluated:
-- If duplicate records comprise ≤ 1.0% of the drop, the duplicate occurrences are routed to `quarantine.parquet`, and valid records proceed.
-- If duplicate records exceed 1.0%, systematic feed corruption is assumed, and the batch rule escalates to a full `hold`.
-
-### 4.3 Redundant Byte-Identical Drop Guard
-If a drop has the identical file hash sequence as the immediate predecessor drop, processing halts to prevent duplicate ingestion passes.
-
----
-
-## 5. Vectorized Compilation & Execution
-
-Rules are translated into DuckDB SQL CASE expressions and executed within a single query pass:
-
-```sql
-SELECT *,
-       ARRAY_FILTER([
-           CASE WHEN entity_id IS NULL THEN 'non_null_entity' ELSE NULL END,
-           CASE WHEN unit NOT IN ('USD', 'shares', 'ratio', 'pure') THEN 'valid_unit_of_measure' ELSE NULL END,
-           CASE WHEN event_time < '1990-01-01'::TIMESTAMPTZ THEN 'plausible_event_time' ELSE NULL END
-       ], x -> x IS NOT NULL) AS quarantine_reasons
-FROM normalized_drop_view;
-```
-
-This columnar evaluation pattern avoids per-row Python overhead, enabling multi-gigabyte per second throughput on modern multicore hardware.
+1. **Duplicate Window Materialization**: A single temporary DuckDB view `numbered` computes `ROW_NUMBER() OVER (PARTITION BY entity_id, field, event_time, knowledge_time ORDER BY source_file, source_row) AS _vdok_dup_rank`, powering both the batch duplicate ratio check and row-level `'duplicate_key'` tagging in one pass.
+2. **Multi-Reason Quarantine Array**: Every active quarantine rule compiles into `CASE WHEN (<predicate>) THEN '<rule_name>' ELSE NULL END` inside a DuckDB array literal, pruned natively with `list_filter([...], lambda x: x IS NOT NULL)` into `quarantine_reasons: list[string]`.
+3. **Quarantine Output**: Rows with non-empty `quarantine_reasons` are written to `data/store/<vendor>/quarantine/part-<drop_id>.parquet` using `QUARANTINE_ARROW_SCHEMA` (`CANONICAL_ARROW_SCHEMA` + `quarantine_reasons` + `quarantined_at`).
+4. **Batch Hold Output**: If any batch-level hold rule triggers, zero data partitions are written and a `HeldDropRecord` is persisted to `data/store/<vendor>/metadata/held_drops.parquet`.

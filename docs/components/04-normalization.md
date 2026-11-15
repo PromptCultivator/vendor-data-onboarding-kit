@@ -2,95 +2,43 @@
 
 ## 1. Overview & Responsibility
 
-The `vdok.normalize` module transforms diverse raw vendor records into a standardized canonical row format. Vendor data arrives with heterogeneous conventions: divergent date representations, unstandardized units of measure, whitespace irregularities, and variable numeric formats.
-
-The normalization layer isolates downstream components from vendor-specific variances by executing pure, deterministic transformations. Every normalization function is tested with property-based testing (Hypothesis) to verify invariant preservation across arbitrary inputs.
+`vdok.normalize` converts heterogeneous vendor CSV, JSON Lines, and Parquet drops into a single 13-column Apache Arrow schema (`CANONICAL_ARROW_SCHEMA`) with exact fixed-point decimals, UTC microsecond timestamps, canonical units, and cryptographic row fingerprints.
 
 ---
 
-## 2. Canonical Row Specification
-
-Every record in the storage engine conforms to the Apache Arrow schema defined below:
+## 2. Canonical Schema (`CANONICAL_ARROW_SCHEMA` & `CanonicalRow`)
 
 ```
-entity_id:       string                  # Resolved canonical entity identifier
-entity_id_type:  string                  # Identifier classification (e.g., "cik", "ticker")
-field:           string                  # Joined field name (e.g., "Revenues|USD|4Q")
-event_time:      timestamp[us, UTC]      # Microsecond timestamp in UTC
-knowledge_time:  timestamp[us, UTC]      # Microsecond timestamp in UTC
-value_num:       decimal128(38, 9)       # Fixed-precision decimal value (null if categorical)
-value_str:       string                  # Text value (null if numeric)
-unit:            string                  # Canonical unit of measure (e.g., "USD", "shares")
-drop_id:         string                  # 16-character source drop identifier
-source_file:     string                  # Relative file path of the origin record
-source_row:      int64                   # 1-based index within the origin file
-row_hash:        string                  # SHA-256 fingerprint of normalized values
+entity_id:       string                  # Resolved canonical entity ID or raw ID if unmapped
+entity_id_type:  string                  # cik | ticker | isin | cusip | vendor_id
+field:           string                  # Field columns joined by "|", or value column name
+event_time:      timestamp[us, UTC]      # Period end or observation timestamp
+knowledge_time:  timestamp[us, UTC]      # Filing or batch drop visibility timestamp
+value_num:       decimal128(38, 9)       # Exact fixed-point numeric value (null if text)
+value_str:       string                  # Textual value (null if numeric)
+unit:            string                  # Canonical unit (USD, shares, pure, ratio)
+drop_id:         string                  # 16-character drop identifier
+source_file:     string                  # Relative path within drop
+source_row:      int64                   # 1-based source row index
+row_hash:        string                  # SHA-256 fingerprint over \0-delimited canonical fields
+unmapped:        bool                    # True if identifier resolution found no master entry
 ```
 
 ---
 
-## 3. Pure Normalization Functions
+## 3. Pure Normalizers & Invariants
 
-### 3.1 Decimal Monetary Parsing
-Floating-point numbers can introduce representation errors (such as `$19.99` becoming `19.989999999999998`). The normalizer parses numbers directly from string representations into exact fixed-point decimals:
+All scalar normalizers are pure functions verified by Hypothesis property tests (`tests/property/test_normalize_properties.py`):
 
-```python
-from decimal import Decimal, InvalidOperation
-
-
-def parse_decimal_exact(raw_val: str | int | float | None) -> Decimal | None:
-    if raw_val is None or raw_val == "":
-        return None
-    if isinstance(raw_val, float):
-        raise TypeError(
-            f"Binary floating-point value {raw_val} rejected for monetary field; "
-            "exact string or integer input required."
-        )
-    try:
-        return Decimal(str(raw_val).strip())
-    except InvalidOperation as err:
-        raise ValueError(f"Malformed decimal literal: {raw_val}") from err
-```
-
-### 3.2 Temporal Standardization to UTC
-Source dates and datetimes are parsed using format specifiers from the vendor manifest. Naive timestamps have their source timezone attached and are then converted to UTC:
-
-```python
-from datetime import datetime, date, timezone
-from zoneinfo import ZoneInfo
-
-
-def parse_timestamp_utc(raw_val: str, fmt: str, source_tz: str = "UTC") -> datetime:
-    parsed = datetime.strptime(raw_val.strip(), fmt)
-    if parsed.tzinfo is None:
-        tz = ZoneInfo(source_tz)
-        localized = parsed.replace(tzinfo=tz)
-    else:
-        localized = parsed
-    return localized.astimezone(timezone.utc)
-```
-
-### 3.3 Unit Standardization
-Measurement units are mapped against an immutable reference table:
-
-| Input Variant | Canonical Unit |
-|---|---|
-| `USD`, `usd`, `US$`, `dollars` | `USD` |
-| `shares`, `Shares`, `SHARES` | `shares` |
-| `pure`, `scalar`, `dimensionless` | `pure` |
-| `%`, `percent`, `pct` | `ratio` (scaled: 100% = 1.0) |
-
-### 3.4 Identifier Folding
-String identifiers are stripped of leading and trailing whitespace, and alphanumeric codes (such as ticker symbols) are converted to uppercase.
+- **`parse_decimal_exact`**: Unconditionally rejects Python `float` inputs with `TypeError` to prevent IEEE 754 representation drift. Accepts `str`, `int`, or `Decimal`, stripping whitespace and quantizing cleanly to 9 fractional digits.
+- **`parse_timestamp_utc`**: Attempts the manifest `strptime` format first, then falls back to `datetime.fromisoformat()` and `dateutil.parser.parse()`. Naive timestamps are localized via standard-library `zoneinfo.ZoneInfo` using the manifest timezone and converted to UTC.
+- **`normalize_unit` / `normalize_unit_and_value`**: Maps unit variants (`usd`, `US$`, `dollar`, `dollars`, `$` → `USD`; `shares`, `share`, `shs` → `shares`; `pure`, `scalar`, `dimensionless` → `pure`; `%`, `percent`, `pct` → `ratio` dividing `value_num` by `100` in exact `Decimal` arithmetic).
+- **`normalize_identifier`**: Trims whitespace, zero-pads numeric CIKs to 10 digits, and uppercases alphanumeric codes such as tickers.
+- **`compute_row_hash`**: Computes `sha256` over `(entity_id, field, event_time_iso, value_num, value_str, unit)` separated by ASCII null bytes (`\0`) so delimiter characters inside field values cannot cause hash collisions.
 
 ---
 
-## 4. Cryptographic Row Fingerprint (`row_hash`)
+## 4. Batch Normalization & Performance (`normalize_drop`)
 
-To verify row uniqueness and detect silent data modifications, each record receives a SHA-256 fingerprint:
-
-```
-row_hash = SHA256(entity_id || field || event_time || value_num || value_str || unit)
-```
-
-This hash is calculated after canonicalization, providing an invariant signature that is independent of serialization formatting.
+- **Drop-Level Knowledge Time Pinning**: When `knowledge_time.source` is `drop_time`, a single UTC timestamp (`default_drop_kt`) is pinned once per drop batch so every row in the transmission shares an identical knowledge coordinate.
+- **Vectorized DuckDB Path (`_normalize_drop_vectorized`)**: Large CSV and Parquet feeds execute in-process inside DuckDB with `all_varchar=True` for CSVs, exact `DECIMAL(38, 12)` → `DECIMAL(38, 9)` casting (routing non-numeric strings in `value_columns` to `value_str` with `value_num = NULL` for downstream `type_flip` quarantine), distinct-entity `SymbolMaster` join resolution, and SQL `sha256` computation matching `compute_row_hash` bit-for-bit.

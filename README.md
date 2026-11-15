@@ -1,3 +1,5 @@
+![Vendor Data Onboarding Kit (vdok)](.github/social-preview.jpg)
+
 # Vendor Data Onboarding Kit (`vdok`)
 
 An append-only bitemporal onboarding kit that validates, normalizes, and stores raw vendor feeds in partitioned Parquet storage with zero look-ahead bias, revision tracking, and deterministic readiness reporting.
